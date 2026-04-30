@@ -1,0 +1,7 @@
+.env/
+__pycache__/
+*.pyc
+
+submissions/
+submission_logs.csv
+student_credentials.xlsx
