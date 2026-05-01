@@ -1,7 +1,23 @@
+# Virtual environments
 .env/
-__pycache__/
-*.pyc
+.venv/
+venv/
 
+# Python cache/bytecode
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Runtime/generated portal data
 submissions/
 submission_logs.csv
 student_credentials.xlsx
+
+# Local datasets / runtime sheets (optional to keep untracked)
+students.xlsx

@@ -1,42 +1,110 @@
 # Assessment Submission Portal
 
-Local Python submission portal with admin + student flows.
+A local, secure, and student-friendly submission portal built with Python.
 
-## Run
+It supports admin and student workflows, multi-material question paper delivery, one-time submissions, configurable file-type controls, and a clean UI with dark mode.
+
+---
+
+## Features
+
+- Admin and student login flow
+- Admin upload for question paper + multiple supporting materials
+- Student material listing with open/download actions
+- One-time final submission (no re-upload)
+- Admin student management, dashboard, and credential export
+- Configurable max file limit and allowed extensions
+- Strict upload validation with clear retry alerts
+- Dark/Light mode toggle
+
+---
+
+## Project Structure
+
+- `server.py` - launcher entry point
+- `portal_app/server_app.py` - routes and request handling
+- `portal_app/portal_config.py` - config and constants
+- `portal_app/portal_data.py` - Excel/log/file operations
+- `portal_app/portal_security.py` - password and token utilities
+- `portal_app/portal_sessions.py` - session lifecycle
+- `portal_app/portal_templates.py` - HTML templates
+- `portal_app/static/style.css` - shared styles
+- `portal_app/requirements.txt` - dependencies
+
+---
+
+## Prerequisites
+
+- Python 3.10+ recommended
+- `pip`
+
+---
+
+## Setup (Recommended: Virtual Environment)
+
+### 1) Go to project folder
+
+```bash
+cd /home/ayyzenn/Desktop/server
+```
+
+### 2) Create virtual environment
+
+```bash
+python3 -m venv .env
+```
+
+### 3) Activate virtual environment
+
+On Linux/macOS:
+
+```bash
+source .env/bin/activate
+```
+
+On Windows (PowerShell):
+
+```powershell
+.env\Scripts\Activate.ps1
+```
+
+On Windows (CMD):
+
+```cmd
+.env\Scripts\activate.bat
+```
+
+### 4) Install dependencies
 
 ```bash
 pip install -r portal_app/requirements.txt
+```
+
+---
+
+## Run the Portal
+
+```bash
 python3 server.py
 ```
 
-Open: `http://localhost:8080`
+Open in browser:
 
-## Default Admin
+- [http://localhost:8080](http://localhost:8080)
+
+---
+
+## Default Admin Credentials
 
 - Username: `admin`
 - Password: `admin123`
 
-## Main Features
+---
 
-- Admin and student login
-- Question paper upload by admin
-- Student question paper view + one-time submission
-- No re-upload after first submission
-- Admin student management and dashboard
-- Password reset (single/all)
-- Export credentials to Excel
-- Configurable max files and allowed extensions
-- Strict extension validation with student-friendly retry popup
-- Light/Dark mode toggle
+## Notes
 
-## Structure
-
-- `server.py` (launcher only)
-- `portal_app/server_app.py`
-- `portal_app/portal_config.py`
-- `portal_app/portal_data.py`
-- `portal_app/portal_security.py`
-- `portal_app/portal_sessions.py`
-- `portal_app/portal_templates.py`
-- `portal_app/static/style.css`
-- `portal_app/requirements.txt`
+- Keep `students.xlsx` in project root with at least:
+  - `Roll No.`
+  - `Student Name`
+- Folders like `question_paper/` and `submissions/` are auto-created if missing.
+- For best reliability, always run inside the virtual environment.

@@ -18,13 +18,15 @@ from .portal_config import (
 )
 from .portal_data import (
     ensure_directories,
+    get_question_paper_file_path,
     has_student_submitted,
     latest_question_paper_path,
+    list_question_paper_files,
     load_data,
     load_logs,
     log_submission,
     save_data,
-    save_question_paper,
+    save_question_paper_files,
     save_student_files,
     student_submission_files,
 )
@@ -38,6 +40,7 @@ from .portal_templates import (
     alert_retry_page,
     info_page,
     login_page,
+    question_materials_page,
     student_home_page,
     student_upload_page,
 )
@@ -105,7 +108,9 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif path == "/student_submit":
                 self.show_student_portal(query)
             elif path == "/question_paper":
-                self.serve_question_paper(query)
+                self.show_question_materials(query)
+            elif path == "/question_paper_file":
+                self.serve_question_paper_file(query)
             elif path == "/admin_panel":
                 if not self.is_admin_authenticated(query):
                     self.send_error(401, "Admin login required")
@@ -318,12 +323,13 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 if not SESSIONS.is_admin_authenticated(admin_token):
                     self.send_error(401, "Admin login required")
                     return
-                qp_file = form["question_paper_file"] if "question_paper_file" in form else None
-                filename = getattr(qp_file, "filename", "") if qp_file is not None else ""
-                if not filename:
-                    self.send_error(400, "Please choose a question paper file.")
+                qp_items = form["question_paper_files"] if "question_paper_files" in form else []
+                if not isinstance(qp_items, list):
+                    qp_items = [qp_items]
+                saved_count = save_question_paper_files(qp_items)
+                if saved_count == 0:
+                    self.send_error(400, "Please choose at least one material file.")
                     return
-                save_question_paper(qp_file)
                 self.redirect(self.admin_url("/admin_panel", admin_token))
             else:
                 self.send_error(400, "Unsupported action")
@@ -354,27 +360,82 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(mem.getvalue())
 
-    def serve_question_paper(self, query):
+    def show_question_materials(self, query):
         roll = str(self.get_query_value(query, "roll", "")).strip()
         token = str(self.get_query_value(query, "token", "")).strip()
         if not self.is_student_authenticated(roll, token):
             self.send_error(401, "Student login required")
             return
-        question_paper_path = latest_question_paper_path()
-        if not question_paper_path:
-            self.send_error(404, "No question paper found.")
+
+        materials = list_question_paper_files()
+        if not materials:
+            self.show_info_page(
+                "No Materials Uploaded",
+                "Question paper/materials are not uploaded yet. Please contact your teacher.",
+                "Back",
+                self.student_url("/student", roll, token),
+            )
             return
-        content_type, _ = mimetypes.guess_type(question_paper_path)
+
+        df = load_data()
+        user = df[df["Roll No."].astype(str) == roll]
+        student_name = str(user.iloc[0]["Student Name"]) if not user.empty else roll
+
+        rows = ""
+        for item in materials:
+            name = item["name"]
+            ext = os.path.splitext(name)[1].lower() or "-"
+            size_kb = max(1, int(item["size_bytes"] / 1024))
+            open_url = (
+                self.student_url("/question_paper_file", roll, token)
+                + f"&file={quote(name)}"
+            )
+            download_url = open_url + "&download=1"
+            rows += (
+                f"<tr><td>{name}</td><td>{ext}</td><td>{size_kb}</td>"
+                f"<td>"
+                f"<a class='btn-link btn-purple' target='_blank' rel='noopener noreferrer' href='{open_url}'>Open</a> "
+                f"<a class='btn-link btn-teal' href='{download_url}'>Download</a>"
+                f"</td></tr>"
+            )
+
+        self.send_html(
+            question_materials_page(
+                student_name=student_name,
+                roll=roll,
+                rows_html=rows,
+                back_url=self.student_url("/student", roll, token),
+            )
+        )
+
+    def serve_question_paper_file(self, query):
+        roll = str(self.get_query_value(query, "roll", "")).strip()
+        token = str(self.get_query_value(query, "token", "")).strip()
+        if not self.is_student_authenticated(roll, token):
+            self.send_error(401, "Student login required")
+            return
+
+        filename = self.get_query_value(query, "file", "").strip()
+        file_path = get_question_paper_file_path(filename)
+        if not file_path:
+            self.send_error(404, "Material file not found.")
+            return
+
+        content_type, _ = mimetypes.guess_type(file_path)
         if not content_type:
             content_type = "application/octet-stream"
+
+        as_download = self.get_query_value(query, "download", "") == "1"
+        disposition = "attachment" if as_download else "inline"
+
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header(
             "Content-Disposition",
-            f'inline; filename="{os.path.basename(question_paper_path)}"',
+            f'{disposition}; filename="{os.path.basename(file_path)}"',
         )
         self.end_headers()
-        with open(question_paper_path, "rb") as file_handle:
+        with open(file_path, "rb") as file_handle:
             self.wfile.write(file_handle.read())
 
     def show_upload_page(self, roll, name, token):

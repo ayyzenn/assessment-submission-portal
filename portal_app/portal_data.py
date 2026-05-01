@@ -112,6 +112,36 @@ def latest_question_paper_path() -> Optional[str]:
     return max(files, key=os.path.getmtime)
 
 
+def list_question_paper_files() -> list[dict]:
+    if not os.path.isdir(QUESTION_PAPER_DIR):
+        return []
+
+    files = []
+    for name in os.listdir(QUESTION_PAPER_DIR):
+        path = os.path.join(QUESTION_PAPER_DIR, name)
+        if os.path.isfile(path):
+            files.append(
+                {
+                    "name": name,
+                    "path": path,
+                    "size_bytes": os.path.getsize(path),
+                    "modified_ts": os.path.getmtime(path),
+                }
+            )
+    files.sort(key=lambda x: x["modified_ts"], reverse=True)
+    return files
+
+
+def get_question_paper_file_path(filename: str) -> Optional[str]:
+    safe_name = os.path.basename(str(filename or "").strip())
+    if not safe_name:
+        return None
+    path = os.path.join(QUESTION_PAPER_DIR, safe_name)
+    if os.path.isfile(path):
+        return path
+    return None
+
+
 def save_question_paper(uploaded_file) -> str:
     os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
     safe_name = os.path.basename(uploaded_file.filename)
@@ -119,3 +149,20 @@ def save_question_paper(uploaded_file) -> str:
     with open(target_path, "wb") as out:
         out.write(uploaded_file.file.read())
     return target_path
+
+
+def save_question_paper_files(uploaded_items) -> int:
+    os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
+    saved_count = 0
+    for item in uploaded_items:
+        filename = getattr(item, "filename", "")
+        if not filename:
+            continue
+        safe_name = os.path.basename(filename)
+        if not safe_name:
+            continue
+        target_path = os.path.join(QUESTION_PAPER_DIR, safe_name)
+        with open(target_path, "wb") as out:
+            out.write(item.file.read())
+        saved_count += 1
+    return saved_count

@@ -130,11 +130,11 @@ def student_home_page(name, roll, view_qp_url, submit_url):
                 </div>
                 <div class="panel-body">
                     <p class="muted">
-                        Step 1: View your question paper.<br>
+                        Step 1: View question paper and attached materials.<br>
                         Step 2: Prepare your solution and submit final files.
                     </p>
                     <div class="form-row">
-                        <a class="btn-link btn-purple" target="_blank" rel="noopener noreferrer" href="{view_qp_url}">View Question Paper</a>
+                        <a class="btn-link btn-purple" href="{view_qp_url}">View Materials</a>
                         <a class="btn-link btn-primary" href="{submit_url}">Submit Solution</a>
                     </div>
                 </div>
@@ -186,19 +186,45 @@ def admin_home_page(navbar_html, current_paper_name, current_paper_time, student
             <main class="container-sm">
                 <div class="card">
                     <h2 class="title">Admin Home</h2>
-                    <p class="muted">Upload or replace the question paper here.</p>
+                    <p class="muted">Upload question paper and any additional material (datasets, configs, starter files, etc.).</p>
                     <div class="info-box">
-                        <div class="small muted"><b>Current Question Paper:</b> {current_paper_name}</div>
+                        <div class="small muted"><b>Latest File:</b> {current_paper_name}</div>
                         <div class="small muted">Last Updated: {current_paper_time}</div>
                     </div>
                     <form method="POST" enctype="multipart/form-data" class="form-row">
                         <input type="hidden" name="action" value="upload_question_paper">
                         <input type="hidden" name="admin_token" value="{admin_token}">
-                        <input type="file" name="question_paper_file" required>
-                        <input class="btn btn-primary" type="submit" value="Upload Question Paper">
+                        <input type="file" name="question_paper_files" multiple required>
+                        <input class="btn btn-primary" type="submit" value="Upload Materials">
                     </form>
                     <br>
                     <a class="btn-link btn-secondary" href="{students_url}">Manage Students</a>
+                </div>
+            </main>
+        </body>
+        """,
+    )
+
+
+def question_materials_page(student_name, roll, rows_html, back_url):
+    return _page(
+        "Question Materials",
+        f"""
+        <body class="bg-soft">
+            <main class="container">
+                <div class="card">
+                    <h2 class="title">Question Materials</h2>
+                    <p class="muted">Student: <b>{student_name}</b> ({roll})</p>
+                    <div class="table-wrap">
+                        <table>
+                            <tr>
+                                <th>File</th><th>Type</th><th>Size (KB)</th><th>Action</th>
+                            </tr>
+                            {rows_html}
+                        </table>
+                    </div>
+                    <br>
+                    <a class="btn-link btn-secondary" href="{back_url}">Back</a>
                 </div>
             </main>
         </body>
