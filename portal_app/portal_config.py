@@ -11,7 +11,7 @@ ADMIN_PASSWORD = "admin123"
 PASSWORD_LENGTH = 8
 SESSION_TTL_SECONDS = 2 * 60 * 60
 
-ALLOWED_EXTENSIONS = {} # Allowed extensions for the submissions
+ALLOWED_EXTENSIONS = {".txt", ".pdf"} # Allowed extensions for the submissions
 
 AVAILABLE_EXTENSIONS = sorted(
     {
@@ -29,4 +29,8 @@ AVAILABLE_EXTENSIONS = sorted(
     }
 )
 
-CONFIG = {"max_files": 2, "allowed_extensions": sorted(ALLOWED_EXTENSIONS)}
+CONFIG = {
+    "max_files": 2,
+    "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
+    "question_paper_count": 1,
+}

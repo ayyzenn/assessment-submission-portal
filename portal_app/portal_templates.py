@@ -178,6 +178,24 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
 
 
 def admin_home_page(navbar_html, current_paper_name, current_paper_time, students_url, admin_token):
+    return admin_home_page_multi(
+        navbar_html=navbar_html,
+        students_url=students_url,
+        admin_token=admin_token,
+        paper_types=["A"],
+        paper_rows_html=f"<tr><td>A</td><td>{current_paper_name}</td><td>{current_paper_time}</td></tr>",
+    )
+
+
+def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, paper_rows_html):
+    file_inputs_html = "".join(
+        f"""
+        <label class="small muted"><b>Paper Type {paper_type}</b></label>
+        <input type="file" name="question_paper_file_{paper_type}" multiple required>
+        """
+        for paper_type in paper_types
+    )
+
     return _page(
         "Admin Panel",
         f"""
@@ -186,15 +204,34 @@ def admin_home_page(navbar_html, current_paper_name, current_paper_time, student
             <main class="container-sm">
                 <div class="card">
                     <h2 class="title">Admin Home</h2>
-                    <p class="muted">Upload question paper and any additional material (datasets, configs, starter files, etc.).</p>
+                    <p class="muted">Set paper variants, upload each paper separately, and map students to a specific paper type.</p>
+                    <form method="POST" class="form-row">
+                        <input type="hidden" name="action" value="update_paper_settings">
+                        <input type="hidden" name="admin_token" value="{admin_token}">
+                        <span class="small muted">Number of Paper Types</span>
+                        <input type="number" name="question_paper_count" min="1" max="26" value="{len(paper_types)}" style="width:84px;">
+                        <input class="btn btn-primary" type="submit" value="Apply">
+                    </form>
+                    <br>
                     <div class="info-box">
-                        <div class="small muted"><b>Latest File:</b> {current_paper_name}</div>
-                        <div class="small muted">Last Updated: {current_paper_time}</div>
+                        <div class="small muted"><b>Current Paper Types:</b> {", ".join(paper_types)}</div>
+                        <div class="small muted">Each type is saved in a separate folder under <code>question_paper/</code>.</div>
+                        <div class="small muted">You can upload multiple files per type (question PDF + datasets + any extra material).</div>
                     </div>
-                    <form method="POST" enctype="multipart/form-data" class="form-row">
+                    <div class="table-wrap">
+                        <table>
+                            <tr><th>Paper Type</th><th>Latest File</th><th>Last Updated</th></tr>
+                            {paper_rows_html}
+                        </table>
+                    </div>
+                    <br>
+                    <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="upload_question_paper">
                         <input type="hidden" name="admin_token" value="{admin_token}">
-                        <input type="file" name="question_paper_files" multiple required>
+                        <div class="ext-grid" style="grid-template-columns:1fr;max-height:none;">
+                            {file_inputs_html}
+                        </div>
+                        <br>
                         <input class="btn btn-primary" type="submit" value="Upload Materials">
                     </form>
                     <br>
@@ -206,7 +243,7 @@ def admin_home_page(navbar_html, current_paper_name, current_paper_time, student
     )
 
 
-def question_materials_page(student_name, roll, rows_html, back_url):
+def question_materials_page(student_name, roll, paper_type, rows_html, back_url):
     return _page(
         "Question Materials",
         f"""
@@ -215,6 +252,7 @@ def question_materials_page(student_name, roll, rows_html, back_url):
                 <div class="card">
                     <h2 class="title">Question Materials</h2>
                     <p class="muted">Student: <b>{student_name}</b> ({roll})</p>
+                    <p class="muted"><b>Assigned Paper Type:</b> {paper_type}</p>
                     <div class="table-wrap">
                         <table>
                             <tr>
@@ -240,6 +278,7 @@ def admin_students_page(
     export_url,
     available_extensions,
     selected_extensions,
+    paper_types,
 ):
     ext_items = []
     for ext in available_extensions:
@@ -292,7 +331,7 @@ def admin_students_page(
                     <div class="table-wrap">
                         <table>
                             <tr>
-                                <th>S#</th><th>Roll</th><th>Name</th><th>Password</th><th>Status</th><th>Last IP</th><th>Files</th><th>Action</th>
+                                <th>S#</th><th>Roll</th><th>Name</th><th>Password</th><th>Paper Type</th><th>Status</th><th>Last IP</th><th>Files</th><th>Action</th>
                             </tr>
                             {rows_html}
                         </table>

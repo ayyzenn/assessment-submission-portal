@@ -24,10 +24,37 @@ def normalize_student_data(df: pd.DataFrame) -> pd.DataFrame:
         df["Student Name"] = ""
     if "Password" not in df.columns:
         df["Password"] = ""
+    if "Paper Type" not in df.columns:
+        df["Paper Type"] = ""
 
     df["Roll No."] = df["Roll No."].fillna("").astype(str)
     df["Student Name"] = df["Student Name"].fillna("").astype(str)
     df["Password"] = df["Password"].fillna("").astype(str)
+    df["Paper Type"] = df["Paper Type"].fillna("").astype(str).str.upper().str.strip()
+    return df
+
+
+def paper_type_labels(count: int) -> list[str]:
+    safe_count = max(1, min(26, int(count)))
+    return [chr(ord("A") + idx) for idx in range(safe_count)]
+
+
+def assign_default_paper_types(df: pd.DataFrame, paper_types: list[str]) -> pd.DataFrame:
+    if not paper_types:
+        paper_types = ["A"]
+    for idx in df.index:
+        df.at[idx, "Paper Type"] = paper_types[idx % len(paper_types)]
+    return df
+
+
+def ensure_valid_paper_types(df: pd.DataFrame, paper_types: list[str]) -> pd.DataFrame:
+    if not paper_types:
+        paper_types = ["A"]
+    valid = set(paper_types)
+    for idx in df.index:
+        current = str(df.at[idx, "Paper Type"]).upper().strip()
+        if current not in valid:
+            df.at[idx, "Paper Type"] = paper_types[idx % len(paper_types)]
     return df
 
 
@@ -99,12 +126,18 @@ def save_student_files(roll: str, file_items, allowed_extensions: set[str]) -> i
     return uploaded_count
 
 
-def latest_question_paper_path() -> Optional[str]:
-    if not os.path.isdir(QUESTION_PAPER_DIR):
+def _paper_type_dir(paper_type: str) -> str:
+    safe_type = str(paper_type or "A").upper().strip()[:1] or "A"
+    return os.path.join(QUESTION_PAPER_DIR, f"type_{safe_type.lower()}")
+
+
+def latest_question_paper_path(paper_type: str = "A") -> Optional[str]:
+    paper_dir = _paper_type_dir(paper_type)
+    if not os.path.isdir(paper_dir):
         return None
     files = []
-    for name in os.listdir(QUESTION_PAPER_DIR):
-        path = os.path.join(QUESTION_PAPER_DIR, name)
+    for name in os.listdir(paper_dir):
+        path = os.path.join(paper_dir, name)
         if os.path.isfile(path):
             files.append(path)
     if not files:
@@ -112,13 +145,14 @@ def latest_question_paper_path() -> Optional[str]:
     return max(files, key=os.path.getmtime)
 
 
-def list_question_paper_files() -> list[dict]:
-    if not os.path.isdir(QUESTION_PAPER_DIR):
+def list_question_paper_files(paper_type: str = "A") -> list[dict]:
+    paper_dir = _paper_type_dir(paper_type)
+    if not os.path.isdir(paper_dir):
         return []
 
     files = []
-    for name in os.listdir(QUESTION_PAPER_DIR):
-        path = os.path.join(QUESTION_PAPER_DIR, name)
+    for name in os.listdir(paper_dir):
+        path = os.path.join(paper_dir, name)
         if os.path.isfile(path):
             files.append(
                 {
@@ -133,26 +167,33 @@ def list_question_paper_files() -> list[dict]:
 
 
 def get_question_paper_file_path(filename: str) -> Optional[str]:
+    return get_question_paper_file_path_for_type("A", filename)
+
+
+def get_question_paper_file_path_for_type(paper_type: str, filename: str) -> Optional[str]:
     safe_name = os.path.basename(str(filename or "").strip())
     if not safe_name:
         return None
-    path = os.path.join(QUESTION_PAPER_DIR, safe_name)
+    paper_dir = _paper_type_dir(paper_type)
+    path = os.path.join(paper_dir, safe_name)
     if os.path.isfile(path):
         return path
     return None
 
 
 def save_question_paper(uploaded_file) -> str:
-    os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
+    target_dir = _paper_type_dir("A")
+    os.makedirs(target_dir, exist_ok=True)
     safe_name = os.path.basename(uploaded_file.filename)
-    target_path = os.path.join(QUESTION_PAPER_DIR, safe_name)
+    target_path = os.path.join(target_dir, safe_name)
     with open(target_path, "wb") as out:
         out.write(uploaded_file.file.read())
     return target_path
 
 
 def save_question_paper_files(uploaded_items) -> int:
-    os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
+    target_dir = _paper_type_dir("A")
+    os.makedirs(target_dir, exist_ok=True)
     saved_count = 0
     for item in uploaded_items:
         filename = getattr(item, "filename", "")
@@ -161,7 +202,60 @@ def save_question_paper_files(uploaded_items) -> int:
         safe_name = os.path.basename(filename)
         if not safe_name:
             continue
-        target_path = os.path.join(QUESTION_PAPER_DIR, safe_name)
+        target_path = os.path.join(target_dir, safe_name)
+        with open(target_path, "wb") as out:
+            out.write(item.file.read())
+        saved_count += 1
+    return saved_count
+
+
+def save_question_paper_file_for_type(paper_type: str, uploaded_item) -> bool:
+    filename = getattr(uploaded_item, "filename", "")
+    if not filename:
+        return False
+    safe_name = os.path.basename(filename)
+    if not safe_name:
+        return False
+
+    target_dir = _paper_type_dir(paper_type)
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Keep only one active paper file per type.
+    for old_name in os.listdir(target_dir):
+        old_path = os.path.join(target_dir, old_name)
+        if os.path.isfile(old_path):
+            os.remove(old_path)
+
+    target_path = os.path.join(target_dir, safe_name)
+    with open(target_path, "wb") as out:
+        out.write(uploaded_item.file.read())
+    return True
+
+
+def _unique_target_path(base_dir: str, filename: str) -> str:
+    name, ext = os.path.splitext(filename)
+    candidate = os.path.join(base_dir, filename)
+    counter = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(base_dir, f"{name}_{counter}{ext}")
+        counter += 1
+    return candidate
+
+
+def save_question_paper_files_for_type(paper_type: str, uploaded_items) -> int:
+    target_dir = _paper_type_dir(paper_type)
+    os.makedirs(target_dir, exist_ok=True)
+
+    items = uploaded_items if isinstance(uploaded_items, list) else [uploaded_items]
+    saved_count = 0
+    for item in items:
+        filename = getattr(item, "filename", "")
+        if not filename:
+            continue
+        safe_name = os.path.basename(filename)
+        if not safe_name:
+            continue
+        target_path = _unique_target_path(target_dir, safe_name)
         with open(target_path, "wb") as out:
             out.write(item.file.read())
         saved_count += 1

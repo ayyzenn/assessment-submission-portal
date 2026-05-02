@@ -17,16 +17,19 @@ from .portal_config import (
     PORT,
 )
 from .portal_data import (
+    assign_default_paper_types,
     ensure_directories,
-    get_question_paper_file_path,
+    ensure_valid_paper_types,
+    get_question_paper_file_path_for_type,
     has_student_submitted,
     latest_question_paper_path,
     list_question_paper_files,
     load_data,
     load_logs,
     log_submission,
+    paper_type_labels,
     save_data,
-    save_question_paper_files,
+    save_question_paper_files_for_type,
     save_student_files,
     student_submission_files,
 )
@@ -35,6 +38,7 @@ from .portal_sessions import SessionStore
 from .portal_templates import (
     admin_dashboard_page,
     admin_home_page,
+    admin_home_page_multi,
     admin_navbar,
     admin_students_page,
     alert_retry_page,
@@ -74,6 +78,21 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         if configured:
             return {ext.lower() for ext in configured}
         return set(ALLOWED_EXTENSIONS)
+
+    def current_paper_types(self):
+        return paper_type_labels(CONFIG.get("question_paper_count", 1))
+
+    def student_assigned_paper_type(self, roll):
+        df = load_data()
+        paper_types = self.current_paper_types()
+        df = ensure_valid_paper_types(df, paper_types)
+        user = df[df["Roll No."].astype(str) == str(roll)]
+        if user.empty:
+            return paper_types[0]
+        assigned = str(user.iloc[0].get("Paper Type", "")).upper().strip()
+        if assigned not in set(paper_types):
+            return paper_types[0]
+        return assigned
 
     def send_html(self, html):
         self.send_response(200)
@@ -273,6 +292,23 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 CONFIG["max_files"] = int(form.getvalue("max_files", 4))
                 self.redirect(self.admin_url("/admin_students", admin_token))
 
+            elif action == "update_paper_settings":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.send_error(401, "Admin login required")
+                    return
+                try:
+                    requested_count = int(form.getvalue("question_paper_count", 1))
+                except ValueError:
+                    self.send_error(400, "Paper count must be a number.")
+                    return
+                safe_count = max(1, min(26, requested_count))
+                CONFIG["question_paper_count"] = safe_count
+                df = load_data()
+                df = assign_default_paper_types(df, self.current_paper_types())
+                save_data(df)
+                self.redirect(self.admin_url("/admin_panel", admin_token))
+
             elif action == "update_extensions":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
@@ -323,14 +359,55 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 if not SESSIONS.is_admin_authenticated(admin_token):
                     self.send_error(401, "Admin login required")
                     return
-                qp_items = form["question_paper_files"] if "question_paper_files" in form else []
-                if not isinstance(qp_items, list):
-                    qp_items = [qp_items]
-                saved_count = save_question_paper_files(qp_items)
+                paper_types = self.current_paper_types()
+                missing = []
+                saved_count = 0
+                for paper_type in paper_types:
+                    field_name = f"question_paper_file_{paper_type}"
+                    if field_name not in form:
+                        missing.append(paper_type)
+                        continue
+                    file_items = form[field_name]
+                    if not isinstance(file_items, list):
+                        file_items = [file_items]
+                    uploaded_for_type = save_question_paper_files_for_type(
+                        paper_type, file_items
+                    )
+                    if uploaded_for_type == 0:
+                        missing.append(paper_type)
+                        continue
+                    saved_count += uploaded_for_type
+                if missing:
+                    self.send_error(
+                        400,
+                        "Please upload at least one file for paper type(s): "
+                        + ", ".join(missing),
+                    )
+                    return
                 if saved_count == 0:
-                    self.send_error(400, "Please choose at least one material file.")
+                    self.send_error(400, "Please choose valid paper files.")
                     return
                 self.redirect(self.admin_url("/admin_panel", admin_token))
+
+            elif action == "set_student_paper_type":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.send_error(401, "Admin login required")
+                    return
+                roll_to_set = str(form.getvalue("target_roll", "")).strip()
+                selected_type = str(form.getvalue("paper_type", "")).strip().upper()
+                allowed_types = set(self.current_paper_types())
+                if selected_type not in allowed_types:
+                    self.send_error(400, "Invalid paper type selected.")
+                    return
+                df = load_data()
+                mask = df["Roll No."].astype(str) == roll_to_set
+                if not mask.any():
+                    self.send_error(404, "Student not found.")
+                    return
+                df.loc[mask, "Paper Type"] = selected_type
+                save_data(df)
+                self.redirect(self.admin_url("/admin_students", admin_token))
             else:
                 self.send_error(400, "Unsupported action")
         except Exception:
@@ -367,11 +444,12 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(401, "Student login required")
             return
 
-        materials = list_question_paper_files()
+        assigned_paper_type = self.student_assigned_paper_type(roll)
+        materials = list_question_paper_files(assigned_paper_type)
         if not materials:
             self.show_info_page(
                 "No Materials Uploaded",
-                "Question paper/materials are not uploaded yet. Please contact your teacher.",
+                f"Paper type {assigned_paper_type} is not uploaded yet. Please contact your teacher.",
                 "Back",
                 self.student_url("/student", roll, token),
             )
@@ -388,7 +466,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             size_kb = max(1, int(item["size_bytes"] / 1024))
             open_url = (
                 self.student_url("/question_paper_file", roll, token)
-                + f"&file={quote(name)}"
+                + f"&type={quote(assigned_paper_type)}&file={quote(name)}"
             )
             download_url = open_url + "&download=1"
             rows += (
@@ -403,6 +481,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             question_materials_page(
                 student_name=student_name,
                 roll=roll,
+                paper_type=assigned_paper_type,
                 rows_html=rows,
                 back_url=self.student_url("/student", roll, token),
             )
@@ -415,8 +494,14 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(401, "Student login required")
             return
 
+        assigned_paper_type = self.student_assigned_paper_type(roll)
+        requested_type = str(self.get_query_value(query, "type", "")).strip().upper()
+        if requested_type and requested_type != assigned_paper_type:
+            self.send_error(403, "You are not allowed to access other paper types.")
+            return
+
         filename = self.get_query_value(query, "file", "").strip()
-        file_path = get_question_paper_file_path(filename)
+        file_path = get_question_paper_file_path_for_type(assigned_paper_type, filename)
         if not file_path:
             self.send_error(404, "Material file not found.")
             return
@@ -512,30 +597,42 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
 
     def show_admin_panel(self, query):
         admin_token = self.get_query_value(query, "token", "")
-        question_paper_path = latest_question_paper_path()
-        current_paper_name = (
-            os.path.basename(question_paper_path) if question_paper_path else "No file uploaded yet"
-        )
-        current_paper_time = (
-            pd.to_datetime(os.path.getmtime(question_paper_path), unit="s").strftime(
-                "%Y-%m-%d %I:%M:%S %p"
+        paper_types = self.current_paper_types()
+        paper_rows = ""
+        for paper_type in paper_types:
+            question_paper_path = latest_question_paper_path(paper_type)
+            current_paper_name = (
+                os.path.basename(question_paper_path)
+                if question_paper_path
+                else "No file uploaded yet"
             )
-            if question_paper_path
-            else "-"
-        )
+            current_paper_time = (
+                pd.to_datetime(os.path.getmtime(question_paper_path), unit="s").strftime(
+                    "%Y-%m-%d %I:%M:%S %p"
+                )
+                if question_paper_path
+                else "-"
+            )
+            paper_rows += (
+                f"<tr><td>{paper_type}</td><td>{current_paper_name}</td>"
+                f"<td>{current_paper_time}</td></tr>"
+            )
         self.send_html(
-            admin_home_page(
+            admin_home_page_multi(
                 navbar_html=self.render_admin_navbar(admin_token),
-                current_paper_name=current_paper_name,
-                current_paper_time=current_paper_time,
                 students_url=self.admin_url("/admin_students", admin_token),
                 admin_token=admin_token,
+                paper_types=paper_types,
+                paper_rows_html=paper_rows,
             )
         )
 
     def show_admin_students(self, query):
         admin_token = self.get_query_value(query, "token", "")
         df = load_data()
+        paper_types = self.current_paper_types()
+        df = ensure_valid_paper_types(df, paper_types)
+        save_data(df)
         logs = load_logs()
         rows = ""
         for idx, row in df.iterrows():
@@ -546,9 +643,24 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             files_list = student_submission_files(roll_str)
             status = "Submitted" if files_list else "Pending"
             files_html = "<br>".join(files_list) if files_list else "<i>No files</i>"
+            selected_type = str(row.get("Paper Type", "")).upper().strip()
+            options_html = ""
+            for paper_type in paper_types:
+                selected_attr = "selected" if paper_type == selected_type else ""
+                options_html += (
+                    f"<option value='{paper_type}' {selected_attr}>{paper_type}</option>"
+                )
             rows += (
                 f"<tr><td>{idx + 1}</td><td>{roll_str}</td><td>{row['Student Name']}</td>"
-                f"<td>{student_password}</td><td>{status}</td><td>{last_ip}</td>"
+                f"<td>{student_password}</td>"
+                f"<td><form method='POST' class='form-row'>"
+                f"<input type='hidden' name='action' value='set_student_paper_type'>"
+                f"<input type='hidden' name='admin_token' value='{admin_token}'>"
+                f"<input type='hidden' name='target_roll' value='{roll_str}'>"
+                f"<select name='paper_type'>{options_html}</select>"
+                f"<input type='submit' value='Set' class='btn btn-secondary'>"
+                f"</form></td>"
+                f"<td>{status}</td><td>{last_ip}</td>"
                 f"<td style='font-size:0.85em'>{files_html}</td>"
                 f"<td><form method='POST' style='display:inline'>"
                 f"<input type='hidden' name='action' value='reset_user'>"
@@ -565,6 +677,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 export_url=self.admin_url("/export_credentials", admin_token),
                 available_extensions=AVAILABLE_EXTENSIONS,
                 selected_extensions=sorted(self.current_allowed_extensions()),
+                paper_types=paper_types,
             )
         )
 
