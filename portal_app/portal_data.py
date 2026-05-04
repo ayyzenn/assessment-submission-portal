@@ -3,13 +3,22 @@ from typing import Optional
 
 import pandas as pd
 
-from .portal_config import EXCEL_FILE, LOG_FILE, QUESTION_PAPER_DIR, UPLOAD_BASE_DIR
+from .portal_config import (
+    EXCEL_FILE,
+    IP_TRACK_FILE,
+    LOG_FILE,
+    QUESTION_PAPER_DIR,
+    UPLOAD_BASE_DIR,
+)
 from .portal_security import generate_password
 
 
 def ensure_directories() -> None:
     os.makedirs(UPLOAD_BASE_DIR, exist_ok=True)
     os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
+    if not os.path.exists(IP_TRACK_FILE):
+        with open(IP_TRACK_FILE, "a", encoding="utf-8"):
+            pass
 
 
 def normalize_student_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -97,6 +106,50 @@ def log_submission(roll: str, ip: str) -> None:
     log_entry.to_csv(LOG_FILE, mode="a", index=False, header=header)
 
 
+def _load_ip_roll_map() -> dict[str, str]:
+    ip_map: dict[str, str] = {}
+    if not os.path.exists(IP_TRACK_FILE):
+        return ip_map
+
+    with open(IP_TRACK_FILE, "r", encoding="utf-8") as file_handle:
+        for raw_line in file_handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            ip = parts[0].strip()
+            roll = parts[1].strip()
+            if not ip or not roll:
+                continue
+            if ip not in ip_map:
+                ip_map[ip] = roll
+    return ip_map
+
+
+def submitted_roll_for_ip(ip: str) -> Optional[str]:
+    clean_ip = str(ip or "").strip()
+    if not clean_ip:
+        return None
+    return _load_ip_roll_map().get(clean_ip)
+
+
+def record_submission_ip(ip: str, roll: str) -> None:
+    clean_ip = str(ip or "").strip()
+    clean_roll = str(roll or "").strip()
+    if not clean_ip or not clean_roll:
+        return
+
+    existing = submitted_roll_for_ip(clean_ip)
+    if existing:
+        return
+
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(IP_TRACK_FILE, "a", encoding="utf-8") as file_handle:
+        file_handle.write(f"{clean_ip}\t{clean_roll}\t{timestamp}\n")
+
+
 def has_student_submitted(roll: str) -> bool:
     return os.path.exists(os.path.join(UPLOAD_BASE_DIR, str(roll)))
 
@@ -111,19 +164,20 @@ def student_submission_files(roll: str) -> list[str]:
     return []
 
 
-def save_student_files(roll: str, file_items, allowed_extensions: set[str]) -> int:
+def save_student_files(roll: str, file_items, allowed_extensions: set[str]) -> list[str]:
     student_dir = os.path.join(UPLOAD_BASE_DIR, str(roll))
     os.makedirs(student_dir, exist_ok=True)
-    uploaded_count = 0
+    uploaded_files = []
     for item in file_items:
         if hasattr(item, "filename") and item.filename:
             ext = os.path.splitext(item.filename)[1].lower()
             if ext in allowed_extensions:
-                filepath = os.path.join(student_dir, os.path.basename(item.filename))
+                safe_name = os.path.basename(item.filename)
+                filepath = os.path.join(student_dir, safe_name)
                 with open(filepath, "wb") as out:
                     out.write(item.file.read())
-                uploaded_count += 1
-    return uploaded_count
+                uploaded_files.append(safe_name)
+    return uploaded_files
 
 
 def _paper_type_dir(paper_type: str) -> str:

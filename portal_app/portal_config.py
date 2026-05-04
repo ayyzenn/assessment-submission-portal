@@ -3,6 +3,7 @@ PORT = 8080
 EXCEL_FILE = "students.xlsx"
 UPLOAD_BASE_DIR = "submissions"
 LOG_FILE = "submission_logs.csv"
+IP_TRACK_FILE = "submission_ip_track.txt"
 QUESTION_PAPER_DIR = "question_paper"
 
 ADMIN_USERNAME = "admin"

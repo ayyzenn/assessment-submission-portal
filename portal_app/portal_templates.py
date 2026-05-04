@@ -24,6 +24,18 @@ def _page(title: str, body_html: str, auto_refresh_seconds: int | None = None) -
         {body_html}
         <script>
             (function() {{
+                const backBtn = document.createElement("button");
+                backBtn.className = "page-back";
+                backBtn.textContent = "Back";
+                backBtn.addEventListener("click", function() {{
+                    if (window.history.length > 1) {{
+                        window.history.back();
+                    }} else {{
+                        window.location.href = "/";
+                    }}
+                }});
+                document.body.appendChild(backBtn);
+
                 const btn = document.createElement("button");
                 btn.className = "theme-toggle";
                 function isDark() {{
@@ -78,6 +90,34 @@ def alert_retry_page(title, message, alert_text, retry_href):
     )
 
 
+def upload_success_page(roll, uploaded_files):
+    items = "".join(f"<li>{name}</li>" for name in uploaded_files)
+    file_count = len(uploaded_files)
+    file_names_inline = ", ".join(uploaded_files)
+    return _page(
+        "Submission Successful",
+        f"""
+        <body class="bg-center">
+            <div class="card center-card" style="max-width:680px;text-align:left;">
+                <h2 class="title">Submission Successful</h2>
+                <p class="muted">
+                    {file_count} file(s) uploaded successfully for Roll No. <b>{roll}</b>.
+                </p>
+                <p class="muted">
+                    <b>Submitted file name(s):</b> {file_names_inline}
+                </p>
+                <p class="muted"><b>Uploaded files:</b></p>
+                <ul>
+                    {items}
+                </ul>
+                <p class="small muted">Your session is now closed for security.</p>
+                <a class="btn-link btn-primary" href="/">Return to Login</a>
+            </div>
+        </body>
+        """,
+    )
+
+
 def login_page():
     return _page(
         "Assessment Submission Portal",
@@ -94,10 +134,24 @@ def login_page():
                     <label>Username</label><br>
                     <input class="w-full" name="username" required><br><br>
                     <label>Password</label><br>
-                    <input class="w-full" type="password" name="password" required><br><br>
+                    <input id="login-password" class="w-full" type="password" name="password" required><br>
+                    <label class="small muted">
+                        <input id="show-password-toggle" type="checkbox">
+                        Show password
+                    </label><br><br>
                     <input class="btn btn-primary w-full" type="submit" value="Login">
                 </form>
             </div>
+            <script>
+                (function() {
+                    const input = document.getElementById("login-password");
+                    const toggle = document.getElementById("show-password-toggle");
+                    if (!input || !toggle) return;
+                    toggle.addEventListener("change", function() {
+                        input.type = toggle.checked ? "text" : "password";
+                    });
+                })();
+            </script>
         </body>
         """,
     )
@@ -129,6 +183,9 @@ def student_home_page(name, roll, view_qp_url, submit_url):
                     <p class="muted text-on-dark" style="margin:0;">Welcome, {name} ({roll})</p>
                 </div>
                 <div class="panel-body">
+                    <div class="form-row" style="justify-content:flex-end;">
+                        <a class="btn-link btn-danger" href="/">Logout</a>
+                    </div>
                     <p class="muted">
                         Step 1: View question paper and attached materials.<br>
                         Step 2: Prepare your solution and submit final files.
@@ -155,6 +212,10 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
                     <p class="muted text-on-dark" style="margin:0;">Welcome, {name} ({roll})</p>
                 </div>
                 <div class="panel-body">
+                    <div class="form-row" style="justify-content:flex-end;">
+                        <a class="btn-link btn-secondary" href="/student?roll={roll}&token={token}">Back</a>
+                        <a class="btn-link btn-danger" href="/">Logout</a>
+                    </div>
                     <div class="info-box info-box-blue">
                         <b>Instructions:</b> You can upload up to {max_files} file(s). Allowed types: {allowed_ext_csv}.
                     </div>
@@ -253,6 +314,10 @@ def question_materials_page(student_name, roll, paper_type, rows_html, back_url)
                     <h2 class="title">Question Materials</h2>
                     <p class="muted">Student: <b>{student_name}</b> ({roll})</p>
                     <p class="muted"><b>Assigned Paper Type:</b> {paper_type}</p>
+                    <div class="form-row" style="justify-content:flex-end;">
+                        <a class="btn-link btn-secondary" href="{back_url}">Back</a>
+                        <a class="btn-link btn-danger" href="/">Logout</a>
+                    </div>
                     <div class="table-wrap">
                         <table>
                             <tr>
@@ -261,8 +326,6 @@ def question_materials_page(student_name, roll, paper_type, rows_html, back_url)
                             {rows_html}
                         </table>
                     </div>
-                    <br>
-                    <a class="btn-link btn-secondary" href="{back_url}">Back</a>
                 </div>
             </main>
         </body>
@@ -296,7 +359,7 @@ def admin_students_page(
             <main class="container">
                 <div class="card">
                     <h2 class="title">Student Management</h2>
-                    <div class="form-row">
+                    <div id="actions" class="form-row">
                         <form method="POST" class="form-row">
                             <span class="small muted">Max Files</span>
                             <input type="number" name="max_files" value="{max_files}" style="width:72px;">

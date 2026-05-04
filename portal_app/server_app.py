@@ -28,9 +28,11 @@ from .portal_data import (
     load_logs,
     log_submission,
     paper_type_labels,
+    record_submission_ip,
     save_data,
     save_question_paper_files_for_type,
     save_student_files,
+    submitted_roll_for_ip,
     student_submission_files,
 )
 from .portal_security import generate_password
@@ -47,6 +49,7 @@ from .portal_templates import (
     question_materials_page,
     student_home_page,
     student_upload_page,
+    upload_success_page,
 )
 
 SESSIONS = SessionStore()
@@ -209,6 +212,18 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                         "/",
                     )
                     return
+                client_ip = str(self.client_address[0]).strip()
+                existing_roll_for_ip = submitted_roll_for_ip(client_ip)
+                if existing_roll_for_ip and existing_roll_for_ip != roll:
+                    SESSIONS.end_student_session(roll)
+                    self.show_info_page(
+                        "Submission Blocked: IP Already Used",
+                        "This network IP has already been used to submit by another student "
+                        f"(Roll No. {existing_roll_for_ip}). Multiple students cannot submit from the same IP.",
+                        "Back to Login",
+                        "/",
+                    )
+                    return
 
                 file_items = form["lab_files"]
                 if not isinstance(file_items, list):
@@ -262,8 +277,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     )
                     return
 
-                uploaded_count = save_student_files(roll, file_items, allowed_extensions)
-                if uploaded_count == 0:
+                uploaded_files = save_student_files(roll, file_items, allowed_extensions)
+                if not uploaded_files:
                     retry_url = self.student_url("/student_submit", roll, token)
                     self.send_html(
                         alert_retry_page(
@@ -275,13 +290,9 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     )
                     return
 
-                log_submission(roll, self.client_address[0])
-                self.show_info_page(
-                    "Submission Successful",
-                    f"{uploaded_count} file(s) uploaded successfully for Roll No. {roll}. Your session has now ended for security.",
-                    "Return to Login",
-                    "/",
-                )
+                log_submission(roll, client_ip)
+                record_submission_ip(client_ip, roll)
+                self.send_html(upload_success_page(roll, uploaded_files))
                 SESSIONS.end_student_session(roll)
 
             elif action == "update_settings":
@@ -290,7 +301,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error(401, "Admin login required")
                     return
                 CONFIG["max_files"] = int(form.getvalue("max_files", 4))
-                self.redirect(self.admin_url("/admin_students", admin_token))
+                self.redirect(self.admin_url("/admin_students", admin_token) + "#actions")
 
             elif action == "update_paper_settings":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
@@ -325,7 +336,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error(400, "Select at least one allowed extension.")
                     return
                 CONFIG["allowed_extensions"] = valid_selected
-                self.redirect(self.admin_url("/admin_students", admin_token))
+                self.redirect(self.admin_url("/admin_students", admin_token) + "#actions")
 
             elif action == "reset_user":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
@@ -338,7 +349,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     generate_password()
                 )
                 save_data(df)
-                self.redirect(self.admin_url("/admin_students", admin_token))
+                self.redirect(self.admin_url("/admin_students", admin_token) + "#actions")
 
             elif action == "reset_all_users":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
@@ -352,7 +363,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 for idx in df.index:
                     df.at[idx, "Password"] = generate_password()
                 save_data(df)
-                self.redirect(self.admin_url("/admin_students", admin_token))
+                self.redirect(self.admin_url("/admin_students", admin_token) + "#actions")
 
             elif action == "upload_question_paper":
                 admin_token = str(form.getvalue("admin_token", "")).strip()

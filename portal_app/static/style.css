@@ -54,28 +54,28 @@ body {
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
-  padding: 18px 20px;
+  padding: 24px 22px;
 }
 
 .container-sm {
   width: 100%;
   max-width: 920px;
   margin: 0 auto;
-  padding: 18px 20px;
+  padding: 24px 22px;
 }
 
 .container-student {
   width: 100%;
   max-width: 760px;
-  margin: 38px auto;
-  padding: 0 14px;
+  margin: 44px auto;
+  padding: 0 16px;
 }
 
 .card {
   background: var(--card-bg);
   border-radius: 10px;
   box-shadow: var(--card-shadow);
-  padding: 16px;
+  padding: 22px;
 }
 
 .login-card {
@@ -108,7 +108,7 @@ body {
 
 .panel-body {
   background: var(--card-bg);
-  padding: 20px;
+  padding: 22px;
   border-radius: 0 0 10px 10px;
   box-shadow: var(--card-shadow);
 }
@@ -165,9 +165,10 @@ body {
 
 .form-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 input[type="text"],
@@ -201,7 +202,7 @@ table {
 th,
 td {
   border: 1px solid var(--border);
-  padding: 6px;
+  padding: 8px;
   text-align: left;
 }
 
@@ -247,6 +248,21 @@ th {
 .theme-toggle {
   position: fixed;
   right: 14px;
+  bottom: 14px;
+  z-index: 9999;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  border-radius: 20px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+}
+
+.page-back {
+  position: fixed;
+  left: 14px;
   bottom: 14px;
   z-index: 9999;
   border: 1px solid var(--border);
