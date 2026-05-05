@@ -77,14 +77,15 @@ def alert_retry_page(title, message, alert_text, retry_href):
         title,
         f"""
         <body class="bg-center">
-            <div class="card center-card">
+            <div class="card center-card center-card-wide align-left">
                 <h2 class="title">{title}</h2>
                 <p class="muted">{message}</p>
+                <div class="error-detail-box">
+                    <div class="small muted"><b>Error details</b></div>
+                    <div class="error-detail-text">{alert_text}</div>
+                </div>
                 <a class="btn-link btn-primary" href="{retry_href}">Retry Upload</a>
             </div>
-            <script>
-                alert({alert_text!r});
-            </script>
         </body>
         """,
     )
@@ -94,23 +95,26 @@ def upload_success_page(roll, uploaded_files):
     items = "".join(f"<li>{name}</li>" for name in uploaded_files)
     file_count = len(uploaded_files)
     file_names_inline = ", ".join(uploaded_files)
+    file_label = "file" if file_count == 1 else "files"
     return _page(
         "Submission Successful",
         f"""
         <body class="bg-center">
-            <div class="card center-card" style="max-width:680px;text-align:left;">
+            <div class="card center-card center-card-wide align-left">
                 <h2 class="title">Submission Successful</h2>
                 <p class="muted">
-                    {file_count} file(s) uploaded successfully for Roll No. <b>{roll}</b>.
+                    Your final submission has been received.
                 </p>
-                <p class="muted">
-                    <b>Submitted file name(s):</b> {file_names_inline}
-                </p>
-                <p class="muted"><b>Uploaded files:</b></p>
-                <ul>
+                <div class="success-summary-box">
+                    <div><b>Roll No.:</b> {roll}</div>
+                    <div><b>Files Submitted:</b> {file_count} {file_label}</div>
+                    <div><b>File Name(s):</b> {file_names_inline}</div>
+                </div>
+                <p class="muted"><b>Submitted Files</b></p>
+                <ul class="success-file-list">
                     {items}
                 </ul>
-                <p class="small muted">Your session is now closed for security.</p>
+                <p class="small muted">Your session has been closed for security.</p>
                 <a class="btn-link btn-primary" href="/">Return to Login</a>
             </div>
         </body>
@@ -123,24 +127,37 @@ def login_page():
         "Assessment Submission Portal",
         """
         <body class="bg-center">
-            <div class="card login-card">
-                <h2 class="title">Login Portal</h2>
-                <p class="muted">
-                    Username is your roll number.
-                    <br>e.g., <b>20P-0051</b>
-                </p>
-                <form method="POST">
-                    <input type="hidden" name="action" value="login">
-                    <label>Username</label><br>
-                    <input class="w-full" name="username" required><br><br>
-                    <label>Password</label><br>
-                    <input id="login-password" class="w-full" type="password" name="password" required><br>
-                    <label class="small muted">
-                        <input id="show-password-toggle" type="checkbox">
-                        Show password
-                    </label><br><br>
-                    <input class="btn btn-primary w-full" type="submit" value="Login">
-                </form>
+            <div class="login-shell">
+                <div class="card login-info-card">
+                    <h2 class="title">Assessment Submission Portal</h2>
+                    <p class="muted">
+                        Login with your assigned credentials to view question materials and submit your final files.
+                    </p>
+                    <div class="info-box">
+                        <div><b>Student username format:</b> Roll number</div>
+                        <div class="small muted">Example: <b>20P-0051</b></div>
+                    </div>
+                    <div class="small muted">Use the password shared by your teacher/admin.</div>
+                </div>
+
+                <div class="card login-card">
+                    <h3 class="title">Sign In</h3>
+                    <form method="POST" class="login-form">
+                        <input type="hidden" name="action" value="login">
+                        <label for="login-username"><b>Username</b></label>
+                        <input id="login-username" class="w-full" name="username" placeholder="Enter your username" required>
+
+                        <label for="login-password"><b>Password</b></label>
+                        <input id="login-password" class="w-full" type="password" name="password" placeholder="Enter your password" required>
+
+                        <label class="small muted">
+                            <input id="show-password-toggle" type="checkbox">
+                            Show password
+                        </label>
+
+                        <input class="btn btn-primary w-full" type="submit" value="Login">
+                    </form>
+                </div>
             </div>
             <script>
                 (function() {
@@ -180,10 +197,10 @@ def student_home_page(name, roll, view_qp_url, submit_url):
             <div class="container-student">
                 <div class="panel-head">
                     <h2 class="title">Student Assessment Portal</h2>
-                    <p class="muted text-on-dark" style="margin:0;">Welcome, {name} ({roll})</p>
+                    <p class="muted text-on-dark no-margin">Welcome, {name} ({roll})</p>
                 </div>
                 <div class="panel-body">
-                    <div class="form-row" style="justify-content:flex-end;">
+                    <div class="form-row justify-end">
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
                     <p class="muted">
@@ -209,10 +226,10 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
             <div class="container-student">
                 <div class="panel-head">
                     <h2 class="title">Submission Portal</h2>
-                    <p class="muted text-on-dark" style="margin:0;">Welcome, {name} ({roll})</p>
+                    <p class="muted text-on-dark no-margin">Welcome, {name} ({roll})</p>
                 </div>
                 <div class="panel-body">
-                    <div class="form-row" style="justify-content:flex-end;">
+                    <div class="form-row justify-end">
                         <a class="btn-link btn-secondary" href="/student?roll={roll}&token={token}">Back</a>
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
@@ -251,8 +268,10 @@ def admin_home_page(navbar_html, current_paper_name, current_paper_time, student
 def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, paper_rows_html):
     file_inputs_html = "".join(
         f"""
-        <label class="small muted"><b>Paper Type {paper_type}</b></label>
-        <input type="file" name="question_paper_file_{paper_type}" multiple required>
+        <div class="upload-type-item">
+            <label class="small muted"><b>Paper Type {paper_type}</b></label>
+            <input type="file" name="question_paper_file_{paper_type}" multiple required>
+        </div>
         """
         for paper_type in paper_types
     )
@@ -263,40 +282,44 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
         <body class="bg-soft">
             {navbar_html}
             <main class="container-sm">
-                <div class="card">
+                <div class="card admin-hero-card">
                     <h2 class="title">Admin Home</h2>
-                    <p class="muted">Set paper variants, upload each paper separately, and map students to a specific paper type.</p>
-                    <form method="POST" class="form-row">
+                    <p class="muted">Use this page for paper setup and question material upload. Other controls are available in the navbar.</p>
+                </div>
+
+                <div class="card admin-section-card">
+                    <h3 class="section-title">Paper Type Setup</h3>
+                    <p class="small muted">Set how many paper variants you want to run (A, B, C ...).</p>
+                    <form method="POST" class="form-row form-row-tight">
                         <input type="hidden" name="action" value="update_paper_settings">
                         <input type="hidden" name="admin_token" value="{admin_token}">
-                        <span class="small muted">Number of Paper Types</span>
-                        <input type="number" name="question_paper_count" min="1" max="26" value="{len(paper_types)}" style="width:84px;">
+                        <label class="small muted" for="question-paper-count"><b>Number of Paper Types</b></label>
+                        <input id="question-paper-count" class="paper-count-input" type="number" name="question_paper_count" min="1" max="26" value="{len(paper_types)}">
                         <input class="btn btn-primary" type="submit" value="Apply">
                     </form>
-                    <br>
                     <div class="info-box">
                         <div class="small muted"><b>Current Paper Types:</b> {", ".join(paper_types)}</div>
                         <div class="small muted">Each type is saved in a separate folder under <code>question_paper/</code>.</div>
                         <div class="small muted">You can upload multiple files per type (question PDF + datasets + any extra material).</div>
                     </div>
+                </div>
+
+                <div class="card admin-section-card">
+                    <h3 class="section-title">Upload Question Paper Materials</h3>
                     <div class="table-wrap">
                         <table>
                             <tr><th>Paper Type</th><th>Latest File</th><th>Last Updated</th></tr>
                             {paper_rows_html}
                         </table>
                     </div>
-                    <br>
                     <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="upload_question_paper">
                         <input type="hidden" name="admin_token" value="{admin_token}">
-                        <div class="ext-grid" style="grid-template-columns:1fr;max-height:none;">
+                        <div class="upload-type-grid">
                             {file_inputs_html}
                         </div>
-                        <br>
                         <input class="btn btn-primary" type="submit" value="Upload Materials">
                     </form>
-                    <br>
-                    <a class="btn-link btn-secondary" href="{students_url}">Manage Students</a>
                 </div>
             </main>
         </body>
@@ -314,7 +337,7 @@ def question_materials_page(student_name, roll, paper_type, rows_html, back_url)
                     <h2 class="title">Question Materials</h2>
                     <p class="muted">Student: <b>{student_name}</b> ({roll})</p>
                     <p class="muted"><b>Assigned Paper Type:</b> {paper_type}</p>
-                    <div class="form-row" style="justify-content:flex-end;">
+                    <div class="form-row justify-end">
                         <a class="btn-link btn-secondary" href="{back_url}">Back</a>
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
@@ -347,7 +370,8 @@ def admin_students_page(
     for ext in available_extensions:
         checked = "checked" if ext in selected_extensions else ""
         ext_items.append(
-            f'<label class="ext-item"><input type="checkbox" name="allowed_extensions" value="{ext}" {checked}> {ext}</label>'
+            f'<label class="ext-item"><input type="checkbox" name="allowed_extensions" value="{ext}" {checked}>'
+            f'<span class="ext-label">{ext}</span></label>'
         )
     ext_html = "".join(ext_items)
 
@@ -357,42 +381,69 @@ def admin_students_page(
         <body class="bg-soft">
             {navbar_html}
             <main class="container">
-                <div class="card">
+                <div class="card admin-section-card">
                     <h2 class="title">Student Management</h2>
-                    <div id="actions" class="form-row">
+                    <p class="small muted">Configure submission rules, extension policy, password reset, and student status from separate sections.</p>
+                </div>
+
+                <div id="actions" class="card admin-section-card">
+                    <h3 class="section-title">Submission Rules</h3>
+                    <div class="form-row">
                         <form method="POST" class="form-row">
                             <span class="small muted">Max Files</span>
-                            <input type="number" name="max_files" value="{max_files}" style="width:72px;">
+                            <input class="max-files-input" type="number" name="max_files" value="{max_files}">
                             <input type="hidden" name="action" value="update_settings">
                             <input type="hidden" name="admin_token" value="{admin_token}">
                             <input class="btn btn-primary" type="submit" value="Update">
                         </form>
-                        <a class="btn-link btn-teal" href="{export_url}">Export Credentials</a>
                     </div>
-                    <br>
-                    <form method="POST">
+                </div>
+
+                <div class="card admin-section-card">
+                    <h3 class="section-title">Allowed Extensions</h3>
+                    <p class="small muted">
+                        Tick the small boxes next to each extension you want to allow, then click <b>Apply Extensions</b>.
+                    </p>
+                    <form method="POST" class="form-row form-col extensions-form">
                         <input type="hidden" name="action" value="update_extensions">
                         <input type="hidden" name="admin_token" value="{admin_token}">
-                        <div class="small muted" style="margin-bottom:6px;"><b>Allowed File Extensions</b></div>
-                        <div class="ext-grid">
+                        <div class="small muted section-label"><b>Allowed file types</b></div>
+                        <div class="ext-grid ext-grid-admin" role="group" aria-label="Allowed file extensions">
                             {ext_html}
                         </div>
-                        <br>
                         <input class="btn btn-primary" type="submit" value="Apply Extensions">
                     </form>
-                    <br>
-                    <form method="POST" onsubmit="return confirm('Are you sure you want to reset passwords for all users?');">
+                </div>
+
+                <div class="card admin-section-card danger-zone">
+                    <h3 class="section-title">Password Reset</h3>
+                    <p class="small muted">Use this carefully. It updates passwords immediately.</p>
+                    <form method="POST" class="form-row form-col" onsubmit="return confirm('Are you sure you want to reset passwords for all users?');">
                         <input type="hidden" name="action" value="reset_all_users">
                         <input type="hidden" name="admin_token" value="{admin_token}">
                         <label class="small muted">
                             <input type="checkbox" name="confirm_reset_all" value="yes" required>
                             I understand this will reset every student's password.
-                        </label><br><br>
+                        </label>
                         <input class="btn btn-red" type="submit" value="Reset All Passwords">
                     </form>
-                    <br>
-                    <div class="table-wrap">
-                        <table>
+                </div>
+
+                <div class="card admin-section-card">
+                    <h3 class="section-title">Student Credentials & Status</h3>
+                    <div class="table-wrap table-wrap-sticky">
+                        <table class="admin-students-table">
+                            <colgroup>
+                                <col class="col-sno">
+                                <col class="col-roll">
+                                <col class="col-name">
+                                <col class="col-password">
+                                <col class="col-paper">
+                                <col class="col-status">
+                                <col class="col-ip">
+                                <col class="col-files">
+                                <col class="col-action">
+                            </colgroup>
                             <tr>
                                 <th>S#</th><th>Roll</th><th>Name</th><th>Password</th><th>Paper Type</th><th>Status</th><th>Last IP</th><th>Files</th><th>Action</th>
                             </tr>
