@@ -783,6 +783,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         df = load_data()
         logs = load_logs()
         rows = ""
+        submitted_count = 0
+        pending_count = 0
         for _, row in df.iterrows():
             roll_str = str(row["Roll No."])
             student_name = str(row.get("Student Name", ""))
@@ -798,18 +800,32 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             else:
                 last_time = "No Upload"
 
-            status = "Submitted" if student_submission_files(roll_str) else "Pending"
-            status_class = "status-green" if status == "Submitted" else "status-red"
+            has_files = bool(student_submission_files(roll_str))
+            if has_files:
+                submitted_count += 1
+                status_key = "submitted"
+                status = "Submitted"
+                status_class = "status-green"
+            else:
+                pending_count += 1
+                status_key = "pending"
+                status = "Pending"
+                status_class = "status-red"
             rows += (
-                f"<tr><td>{student_name}</td><td>{roll_str}</td><td>{last_ip}</td>"
+                f'<tr class="dashboard-row" data-status="{status_key}">'
+                f"<td>{student_name}</td><td>{roll_str}</td><td>{last_ip}</td>"
                 f"<td>{last_time}</td><td><span class='{status_class}'>{status}</span></td></tr>"
             )
 
+        total_count = len(df)
         self.send_html(
             admin_dashboard_page(
                 navbar_html=self.render_admin_navbar(admin_token),
                 rows_html=rows,
                 refresh_seconds=5,
+                submitted_count=submitted_count,
+                pending_count=pending_count,
+                total_count=total_count,
             )
         )
 

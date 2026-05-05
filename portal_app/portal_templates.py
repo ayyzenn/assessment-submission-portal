@@ -54,6 +54,12 @@ def _page(title: str, body_html: str, auto_refresh_seconds: int | None = None) -
                 }});
                 setLabel();
                 document.body.appendChild(btn);
+
+                const credit = document.createElement("div");
+                credit.className = "dev-credit";
+                credit.setAttribute("aria-hidden", "true");
+                credit.textContent = "by ayyzenn";
+                document.body.appendChild(credit);
             }})();
         </script>
     </html>
@@ -481,25 +487,101 @@ def admin_students_page(
     )
 
 
-def admin_dashboard_page(navbar_html, rows_html, refresh_seconds=5):
+def admin_dashboard_page(
+    navbar_html,
+    rows_html,
+    refresh_seconds=5,
+    submitted_count=0,
+    pending_count=0,
+    total_count=0,
+):
     return _page(
         "Submission Dashboard",
         f"""
         <body class="bg-soft">
             {navbar_html}
             <main class="container">
-                <div class="card">
+                <div class="card admin-section-card">
                     <h2 class="title">Submission Dashboard</h2>
-                    <div class="table-wrap">
-                        <table>
-                            <tr>
-                                <th>Name</th><th>Roll</th><th>IP Address</th><th>Timestamp</th><th>Status</th>
-                            </tr>
-                            {rows_html}
+                    <p class="small muted">Summary updates every {refresh_seconds}s with page refresh. Filter choice is remembered until you close the tab.</p>
+                    <div class="dashboard-stats" role="region" aria-label="Submission counts">
+                        <div class="stat-tile">
+                            <div class="stat-tile-value">{total_count}</div>
+                            <div class="stat-tile-label">Total students</div>
+                        </div>
+                        <div class="stat-tile stat-tile-submitted">
+                            <div class="stat-tile-value">{submitted_count}</div>
+                            <div class="stat-tile-label">Submitted</div>
+                        </div>
+                        <div class="stat-tile stat-tile-pending">
+                            <div class="stat-tile-value">{pending_count}</div>
+                            <div class="stat-tile-label">Pending</div>
+                        </div>
+                    </div>
+                    <div class="dashboard-toolbar form-row">
+                        <label class="small muted" for="dash-filter"><b>Show</b></label>
+                        <select id="dash-filter" class="dashboard-filter" aria-label="Filter dashboard rows">
+                            <option value="all">All students</option>
+                            <option value="submitted">Submitted only</option>
+                            <option value="pending">Pending only</option>
+                        </select>
+                        <span id="dash-showing" class="small muted"></span>
+                    </div>
+                    <div class="table-wrap table-wrap-sticky">
+                        <table class="admin-dashboard-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th><th>Roll</th><th>IP Address</th><th>Timestamp</th><th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashboard-tbody">
+                                {rows_html}
+                            </tbody>
                         </table>
                     </div>
                 </div>
             </main>
+            <script>
+                (function() {{
+                    const STORAGE_KEY = "portal_dashboard_filter";
+                    const tbody = document.getElementById("dashboard-tbody");
+                    const sel = document.getElementById("dash-filter");
+                    const showing = document.getElementById("dash-showing");
+                    const total = {total_count};
+                    if (!tbody || !sel || !showing) return;
+
+                    function applyFilter() {{
+                        const mode = sel.value;
+                        const rows = tbody.querySelectorAll("tr.dashboard-row");
+                        let visible = 0;
+                        rows.forEach(function(tr) {{
+                            const st = tr.getAttribute("data-status") || "";
+                            const ok = mode === "all" || mode === st;
+                            tr.style.display = ok ? "" : "none";
+                            if (ok) visible += 1;
+                        }});
+                        if (mode === "all") {{
+                            showing.textContent = "Showing all " + total + " students.";
+                        }} else {{
+                            const label = mode === "submitted" ? "submitted" : "pending";
+                            showing.textContent = "Showing " + visible + " of " + total + " (" + label + " only).";
+                        }}
+                    }}
+
+                    try {{
+                        const saved = sessionStorage.getItem(STORAGE_KEY);
+                        if (saved === "all" || saved === "submitted" || saved === "pending") {{
+                            sel.value = saved;
+                        }}
+                    }} catch (e) {{}}
+
+                    sel.addEventListener("change", function() {{
+                        try {{ sessionStorage.setItem(STORAGE_KEY, sel.value); }} catch (e) {{}}
+                        applyFilter();
+                    }});
+                    applyFilter();
+                }})();
+            </script>
         </body>
         """,
         auto_refresh_seconds=refresh_seconds,
