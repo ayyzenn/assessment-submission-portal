@@ -219,7 +219,7 @@ def admin_navbar(admin_home_url, students_url, dashboard_url, export_url, logout
     """
 
 
-def student_home_page(name, roll, view_qp_url, submit_url):
+def student_home_page(name, roll, view_qp_url, submit_url, games_url):
     return _page(
         "Student Portal",
         f"""
@@ -231,6 +231,7 @@ def student_home_page(name, roll, view_qp_url, submit_url):
                 </div>
                 <div class="panel-body">
                     <div class="form-row justify-end">
+                        <a class="btn-link btn-teal" href="{games_url}">Play Game</a>
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
                     <p class="muted">
@@ -243,6 +244,338 @@ def student_home_page(name, roll, view_qp_url, submit_url):
                     </div>
                 </div>
             </div>
+        </body>
+        """,
+    )
+
+
+def student_games_page(name, roll, token):
+    return _page(
+        "Mini Games",
+        f"""
+        <body class="bg-soft">
+            <div class="container-student">
+                <div class="panel-head">
+                    <h2 class="title">Mini Games Corner</h2>
+                    <p class="muted text-on-dark no-margin">Have fun, {name} ({roll})</p>
+                </div>
+                <div class="panel-body">
+                    <div class="form-row justify-end">
+                        <a class="btn-link btn-secondary" href="/student?roll={roll}&token={token}">Back</a>
+                        <a class="btn-link btn-danger" href="/">Logout</a>
+                    </div>
+                    <p class="muted">
+                        Choose a game below.
+                    </p>
+                    <div class="game-tabs" role="tablist" aria-label="Game selector">
+                        <button class="btn btn-purple game-tab-btn" id="tab-snake" data-game="snake" aria-selected="true">Snake</button>
+                        <button class="btn btn-teal game-tab-btn" id="tab-flappy" data-game="flappy" aria-selected="false">Flappy Bird</button>
+                    </div>
+
+                    <section class="game-panel" id="game-panel-snake">
+                        <h3 class="section-title">Snake</h3>
+                        <p class="small muted">Controls: Arrow keys. Press <b>Space</b> to restart after game over.</p>
+                        <div class="game-scoreboard" aria-live="polite">
+                            <div class="score-chip">
+                                <span class="score-chip-label">Score</span>
+                                <span class="score-chip-value" id="snake-score">0</span>
+                            </div>
+                            <div class="score-chip score-chip-best">
+                                <span class="score-chip-label">High Score</span>
+                                <span class="score-chip-value" id="snake-high-score">0</span>
+                            </div>
+                        </div>
+                        <canvas id="snake-canvas" class="game-canvas" width="420" height="420"></canvas>
+                    </section>
+
+                    <section class="game-panel" id="game-panel-flappy" hidden>
+                        <h3 class="section-title">Flappy Bird</h3>
+                        <p class="small muted">Controls: Press <b>Space</b> to flap. Press <b>Space</b> again after game over to restart.</p>
+                        <div class="game-scoreboard" aria-live="polite">
+                            <div class="score-chip">
+                                <span class="score-chip-label">Score</span>
+                                <span class="score-chip-value" id="flappy-score">0</span>
+                            </div>
+                            <div class="score-chip score-chip-best">
+                                <span class="score-chip-label">High Score</span>
+                                <span class="score-chip-value" id="flappy-high-score">0</span>
+                            </div>
+                        </div>
+                        <canvas id="flappy-canvas" class="game-canvas game-canvas-wide" width="520" height="320"></canvas>
+                    </section>
+                </div>
+            </div>
+
+            <script>
+                (function () {{
+                    const tabButtons = document.querySelectorAll(".game-tab-btn");
+                    const panels = {{
+                        snake: document.getElementById("game-panel-snake"),
+                        flappy: document.getElementById("game-panel-flappy"),
+                    }};
+                    let activeGame = "snake";
+
+                    function showGame(name) {{
+                        activeGame = name;
+                        panels.snake.hidden = name !== "snake";
+                        panels.flappy.hidden = name !== "flappy";
+                        tabButtons.forEach(function (btn) {{
+                            const isActive = btn.getAttribute("data-game") === name;
+                            btn.setAttribute("aria-selected", isActive ? "true" : "false");
+                            btn.classList.toggle("btn-primary", isActive);
+                        }});
+                    }}
+
+                    tabButtons.forEach(function (btn) {{
+                        btn.addEventListener("click", function () {{
+                            showGame(btn.getAttribute("data-game"));
+                        }});
+                    }});
+
+                    showGame("snake");
+
+                    // Snake game
+                    const snakeCanvas = document.getElementById("snake-canvas");
+                    const snakeCtx = snakeCanvas.getContext("2d");
+                    const snakeScoreEl = document.getElementById("snake-score");
+                    const snakeHighScoreEl = document.getElementById("snake-high-score");
+                    const snakeHighScoreKey = "portal_game_snake_high_score";
+                    let snakeHighScore = Number(localStorage.getItem(snakeHighScoreKey) || "0");
+                    const snakeGrid = 21;
+                    const snakeTile = snakeCanvas.width / snakeGrid;
+                    let snakeDirection = {{ x: 1, y: 0 }};
+                    let snakeNextDirection = {{ x: 1, y: 0 }};
+                    let snakeBody = [{{ x: 9, y: 10 }}];
+                    let snakeFood = {{ x: 15, y: 10 }};
+                    let snakeScore = 0;
+                    let snakeGameOver = false;
+                    snakeHighScoreEl.textContent = String(snakeHighScore);
+
+                    function snakeReset() {{
+                        snakeDirection = {{ x: 1, y: 0 }};
+                        snakeNextDirection = {{ x: 1, y: 0 }};
+                        snakeBody = [{{ x: 9, y: 10 }}];
+                        snakeFood = {{ x: 15, y: 10 }};
+                        snakeScore = 0;
+                        snakeGameOver = false;
+                        snakeScoreEl.textContent = "0";
+                    }}
+
+                    function snakePlaceFood() {{
+                        while (true) {{
+                            const fx = Math.floor(Math.random() * snakeGrid);
+                            const fy = Math.floor(Math.random() * snakeGrid);
+                            if (!snakeBody.some(function (s) {{ return s.x === fx && s.y === fy; }})) {{
+                                snakeFood = {{ x: fx, y: fy }};
+                                return;
+                            }}
+                        }}
+                    }}
+
+                    function snakeStep() {{
+                        if (snakeGameOver) return;
+                        snakeDirection = snakeNextDirection;
+                        const head = snakeBody[0];
+                        const next = {{ x: head.x + snakeDirection.x, y: head.y + snakeDirection.y }};
+
+                        if (next.x < 0 || next.y < 0 || next.x >= snakeGrid || next.y >= snakeGrid) {{
+                            snakeGameOver = true;
+                            return;
+                        }}
+                        if (snakeBody.some(function (s) {{ return s.x === next.x && s.y === next.y; }})) {{
+                            snakeGameOver = true;
+                            return;
+                        }}
+
+                        snakeBody.unshift(next);
+                        if (next.x === snakeFood.x && next.y === snakeFood.y) {{
+                            snakeScore += 1;
+                            snakeScoreEl.textContent = String(snakeScore);
+                            if (snakeScore > snakeHighScore) {{
+                                snakeHighScore = snakeScore;
+                                snakeHighScoreEl.textContent = String(snakeHighScore);
+                                localStorage.setItem(snakeHighScoreKey, String(snakeHighScore));
+                            }}
+                            snakePlaceFood();
+                        }} else {{
+                            snakeBody.pop();
+                        }}
+                    }}
+
+                    function snakeDraw() {{
+                        snakeCtx.fillStyle = "#0f172a";
+                        snakeCtx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+
+                        snakeCtx.fillStyle = "#22c55e";
+                        snakeBody.forEach(function (s) {{
+                            snakeCtx.fillRect(s.x * snakeTile + 1, s.y * snakeTile + 1, snakeTile - 2, snakeTile - 2);
+                        }});
+
+                        snakeCtx.fillStyle = "#ef4444";
+                        snakeCtx.fillRect(
+                            snakeFood.x * snakeTile + 2,
+                            snakeFood.y * snakeTile + 2,
+                            snakeTile - 4,
+                            snakeTile - 4
+                        );
+
+                        if (snakeGameOver) {{
+                            snakeCtx.fillStyle = "rgba(0, 0, 0, 0.45)";
+                            snakeCtx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+                            snakeCtx.fillStyle = "#ffffff";
+                            snakeCtx.font = "bold 26px sans-serif";
+                            snakeCtx.fillText("Game Over", 130, 195);
+                            snakeCtx.font = "14px sans-serif";
+                            snakeCtx.fillText("Press Space to restart", 132, 220);
+                        }}
+                    }}
+
+                    setInterval(function () {{
+                        snakeStep();
+                        snakeDraw();
+                    }}, 110);
+
+                    // Flappy game
+                    const flappyCanvas = document.getElementById("flappy-canvas");
+                    const flappyCtx = flappyCanvas.getContext("2d");
+                    const flappyScoreEl = document.getElementById("flappy-score");
+                    const flappyHighScoreEl = document.getElementById("flappy-high-score");
+                    const flappyHighScoreKey = "portal_game_flappy_high_score";
+                    let flappyHighScore = Number(localStorage.getItem(flappyHighScoreKey) || "0");
+                    flappyHighScoreEl.textContent = String(flappyHighScore);
+                    const flappyState = {{
+                        birdY: 150,
+                        birdVY: 0,
+                        gravity: 0.38,
+                        flapLift: -6.4,
+                        pipes: [],
+                        frame: 0,
+                        score: 0,
+                        alive: true,
+                    }};
+
+                    function flappyReset() {{
+                        flappyState.birdY = 150;
+                        flappyState.birdVY = 0;
+                        flappyState.pipes = [];
+                        flappyState.frame = 0;
+                        flappyState.score = 0;
+                        flappyState.alive = true;
+                        flappyScoreEl.textContent = "0";
+                    }}
+
+                    function flappySpawnPipe() {{
+                        const gap = 110;
+                        const topHeight = 40 + Math.floor(Math.random() * 150);
+                        flappyState.pipes.push({{
+                            x: flappyCanvas.width + 20,
+                            w: 56,
+                            top: topHeight,
+                            bottomY: topHeight + gap,
+                            passed: false,
+                        }});
+                    }}
+
+                    function flappyStep() {{
+                        if (!flappyState.alive) return;
+                        flappyState.frame += 1;
+                        flappyState.birdVY += flappyState.gravity;
+                        flappyState.birdY += flappyState.birdVY;
+
+                        if (flappyState.frame % 95 === 0) {{
+                            flappySpawnPipe();
+                        }}
+
+                        const birdX = 115;
+                        const birdSize = 18;
+
+                        flappyState.pipes.forEach(function (p) {{
+                            p.x -= 2.4;
+                            const inX = birdX + birdSize > p.x && birdX - birdSize < p.x + p.w;
+                            const hitTop = flappyState.birdY - birdSize < p.top;
+                            const hitBottom = flappyState.birdY + birdSize > p.bottomY;
+                            if (inX && (hitTop || hitBottom)) {{
+                                flappyState.alive = false;
+                            }}
+                            if (!p.passed && p.x + p.w < birdX) {{
+                                p.passed = true;
+                                flappyState.score += 1;
+                                flappyScoreEl.textContent = String(flappyState.score);
+                                if (flappyState.score > flappyHighScore) {{
+                                    flappyHighScore = flappyState.score;
+                                    flappyHighScoreEl.textContent = String(flappyHighScore);
+                                    localStorage.setItem(flappyHighScoreKey, String(flappyHighScore));
+                                }}
+                            }}
+                        }});
+
+                        flappyState.pipes = flappyState.pipes.filter(function (p) {{ return p.x + p.w > -5; }});
+
+                        if (flappyState.birdY > flappyCanvas.height - 8 || flappyState.birdY < 8) {{
+                            flappyState.alive = false;
+                        }}
+                    }}
+
+                    function flappyDraw() {{
+                        flappyCtx.fillStyle = "#0ea5e9";
+                        flappyCtx.fillRect(0, 0, flappyCanvas.width, flappyCanvas.height);
+
+                        flappyCtx.fillStyle = "#16a34a";
+                        flappyState.pipes.forEach(function (p) {{
+                            flappyCtx.fillRect(p.x, 0, p.w, p.top);
+                            flappyCtx.fillRect(p.x, p.bottomY, p.w, flappyCanvas.height - p.bottomY);
+                        }});
+
+                        flappyCtx.fillStyle = "#f59e0b";
+                        flappyCtx.beginPath();
+                        flappyCtx.arc(115, flappyState.birdY, 13, 0, Math.PI * 2);
+                        flappyCtx.fill();
+
+                        if (!flappyState.alive) {{
+                            flappyCtx.fillStyle = "rgba(0, 0, 0, 0.35)";
+                            flappyCtx.fillRect(0, 0, flappyCanvas.width, flappyCanvas.height);
+                            flappyCtx.fillStyle = "#ffffff";
+                            flappyCtx.font = "bold 28px sans-serif";
+                            flappyCtx.fillText("Game Over", 180, 145);
+                            flappyCtx.font = "14px sans-serif";
+                            flappyCtx.fillText("Press Space to restart", 188, 170);
+                        }}
+                    }}
+
+                    setInterval(function () {{
+                        flappyStep();
+                        flappyDraw();
+                    }}, 16);
+
+                    document.addEventListener("keydown", function (event) {{
+                        const key = event.key;
+                        if (activeGame === "snake") {{
+                            if (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight" || key === " ") {{
+                                event.preventDefault();
+                            }}
+                            if (key === "ArrowUp" && snakeDirection.y !== 1) snakeNextDirection = {{ x: 0, y: -1 }};
+                            if (key === "ArrowDown" && snakeDirection.y !== -1) snakeNextDirection = {{ x: 0, y: 1 }};
+                            if (key === "ArrowLeft" && snakeDirection.x !== 1) snakeNextDirection = {{ x: -1, y: 0 }};
+                            if (key === "ArrowRight" && snakeDirection.x !== -1) snakeNextDirection = {{ x: 1, y: 0 }};
+                            if (key === " " && snakeGameOver) snakeReset();
+                        }}
+
+                        if (activeGame === "flappy" && key === " ") {{
+                            event.preventDefault();
+                            if (!flappyState.alive) {{
+                                flappyReset();
+                            }} else {{
+                                flappyState.birdVY = flappyState.flapLift;
+                            }}
+                        }}
+                    }});
+
+                    snakeReset();
+                    flappyReset();
+                    snakeDraw();
+                    flappyDraw();
+                }})();
+            </script>
         </body>
         """,
     )

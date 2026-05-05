@@ -168,23 +168,29 @@ def record_submission_ip(ip: str, roll: str) -> None:
         file_handle.write(f"{clean_ip}\t{clean_roll}\t{timestamp}\n")
 
 
-def has_student_submitted(roll: str) -> bool:
-    return os.path.exists(os.path.join(UPLOAD_BASE_DIR, str(roll)))
-
-
 def student_submission_files(roll: str) -> list[str]:
     student_path = os.path.join(UPLOAD_BASE_DIR, str(roll))
     try:
-        if os.path.exists(student_path):
-            return os.listdir(student_path)
+        if not os.path.isdir(student_path):
+            return []
+        names = []
+        for name in os.listdir(student_path):
+            if os.path.isfile(os.path.join(student_path, name)):
+                names.append(name)
+        names.sort()
+        return names
     except OSError:
         return []
-    return []
+
+
+def has_student_submitted(roll: str) -> bool:
+    # Match admin dashboard/students: only count a real submission when at least
+    # one saved file exists — not merely an empty submissions/<roll>/ folder.
+    return bool(student_submission_files(roll))
 
 
 def save_student_files(roll: str, file_items, allowed_extensions: set[str]) -> list[str]:
     student_dir = os.path.join(UPLOAD_BASE_DIR, str(roll))
-    os.makedirs(student_dir, exist_ok=True)
     uploaded_files = []
     for item in file_items:
         if hasattr(item, "filename") and item.filename:
@@ -192,6 +198,7 @@ def save_student_files(roll: str, file_items, allowed_extensions: set[str]) -> l
             if ext in allowed_extensions:
                 safe_name = os.path.basename(item.filename)
                 filepath = os.path.join(student_dir, safe_name)
+                os.makedirs(student_dir, exist_ok=True)
                 with open(filepath, "wb") as out:
                     out.write(item.file.read())
                 uploaded_files.append(safe_name)

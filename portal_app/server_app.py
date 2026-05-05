@@ -49,6 +49,7 @@ from .portal_templates import (
     info_page,
     login_page,
     question_materials_page,
+    student_games_page,
     student_home_page,
     student_upload_page,
     upload_success_page,
@@ -65,6 +66,14 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
     # when DNS is slow or unreachable (common on LAN IPs like 172.16.x.x).
     def address_string(self):
         return str(self.client_address[0])
+
+    def end_headers(self):
+        # Always close the TCP connection after POST so the next browser request
+        # gets a fresh connection. Avoids rare HTTP/1.1 keep-alive desync when
+        # multipart parsing or error paths interact badly with the socket buffer.
+        if getattr(self, "_portal_post_close", False):
+            self.send_header("Connection", "close")
+        super().end_headers()
 
     def parse_request_context(self):
         parsed = urlparse(self.path)
@@ -161,6 +170,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 self.show_student_portal(query)
             elif path == "/question_paper":
                 self.show_question_materials(query)
+            elif path == "/student_games":
+                self.show_student_games(query)
             elif path == "/question_paper_file":
                 self.serve_question_paper_file(query)
             elif path == "/admin_panel":
@@ -196,9 +207,12 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, "Unexpected server error")
 
     def do_POST(self):
+        self._portal_post_close = True
         try:
             form = cgi.FieldStorage(
-                fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"}
+                fp=self.rfile,
+                headers=self.headers,
+                environ={"REQUEST_METHOD": "POST"},
             )
             action = form.getvalue("action")
 
@@ -475,6 +489,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             self.redirect_login_notice("data")
         except Exception:
             self.send_error(500, "Unexpected server error")
+        finally:
+            self._portal_post_close = False
 
     def export_credentials_excel(self):
         df = load_data().copy()
@@ -652,6 +668,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 roll=roll,
                 view_qp_url=self.student_url("/question_paper", roll, token),
                 submit_url=self.student_url("/student_submit", roll, token),
+                games_url=self.student_url("/student_games", roll, token),
             )
         )
 
@@ -682,6 +699,35 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             )
             return
         self.show_upload_page(roll, user.iloc[0]["Student Name"], token)
+
+    def show_student_games(self, query):
+        roll = str(self.get_query_value(query, "roll", "")).strip()
+        token = str(self.get_query_value(query, "token", "")).strip()
+        if not self.is_student_authenticated(roll, token):
+            self.redirect_login_notice("session")
+            return
+        if has_student_submitted(roll):
+            SESSIONS.end_student_session(roll)
+            self.show_info_page(
+                "Submission Already Completed",
+                "You have already submitted your files. Re-upload is not allowed.",
+                "Back to Login",
+                "/",
+            )
+            return
+        df = load_data()
+        user = df[df["Roll No."].astype(str) == roll]
+        if user.empty:
+            SESSIONS.end_student_session(roll)
+            self.show_info_page(
+                "Student Record Not Found",
+                "Your roll number is not listed in the current student roster, or the roster changed while you were signed in. Please contact your administrator.",
+                "Return to Login",
+                "/",
+            )
+            return
+
+        self.send_html(student_games_page(str(user.iloc[0]["Student Name"]), roll, token))
 
     def render_admin_navbar(self, admin_token):
         return admin_navbar(
