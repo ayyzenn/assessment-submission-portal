@@ -4,6 +4,7 @@ import io
 import mimetypes
 import os
 import socketserver
+import sys
 from urllib.parse import parse_qs, quote, urlparse
 
 import pandas as pd
@@ -17,6 +18,7 @@ from .portal_config import (
     PORT,
 )
 from .portal_data import (
+    PortalDataError,
     assign_default_paper_types,
     ensure_directories,
     ensure_valid_paper_types,
@@ -54,8 +56,16 @@ from .portal_templates import (
 
 SESSIONS = SessionStore()
 
+_ALLOWED_LOGIN_NOTICES = frozenset({"invalid", "session", "data", "assets"})
+
 
 class SecureLabHandler(http.server.BaseHTTPRequestHandler):
+    # Avoid reverse DNS on every request — BaseHTTPRequestHandler.address_string()
+    # calls socket.getfqdn() by default, which can stall responses for many seconds
+    # when DNS is slow or unreachable (common on LAN IPs like 172.16.x.x).
+    def address_string(self):
+        return str(self.client_address[0])
+
     def parse_request_context(self):
         parsed = urlparse(self.path)
         return parsed.path, parse_qs(parsed.query)
@@ -107,7 +117,15 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         base_dir = os.path.dirname(__file__)
         css_path = os.path.join(base_dir, "static", "style.css")
         if not os.path.exists(css_path):
-            self.send_error(404, "CSS not found")
+            self.send_html(
+                info_page(
+                    "Missing Stylesheet",
+                    "The portal stylesheet file could not be found on the server. "
+                    "Ensure portal_app/static/style.css exists next to the application.",
+                    "Go to Login",
+                    "/",
+                )
+            )
             return
         self.send_response(200)
         self.send_header("Content-Type", "text/css; charset=utf-8")
@@ -118,11 +136,23 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
     def show_info_page(self, title, message, action_text="Return to Login", action_href="/"):
         self.send_html(info_page(title, message, action_text, action_href))
 
+    def redirect_login_notice(self, notice: str):
+        notice_clean = str(notice or "").strip().lower()
+        if notice_clean not in _ALLOWED_LOGIN_NOTICES:
+            notice_clean = "invalid"
+        self.redirect(f"/?notice={quote(notice_clean)}")
+
+    def show_login_form(self, query):
+        notice = str(self.get_query_value(query, "notice", "")).strip().lower()
+        if notice not in _ALLOWED_LOGIN_NOTICES:
+            notice = ""
+        self.send_html(login_page(notice=notice))
+
     def do_GET(self):
         try:
             path, query = self.parse_request_context()
             if path in ["/", "/admin"]:
-                self.show_login_form()
+                self.show_login_form(query)
             elif path == "/static/style.css":
                 self.serve_static_css()
             elif path == "/student":
@@ -135,26 +165,33 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 self.serve_question_paper_file(query)
             elif path == "/admin_panel":
                 if not self.is_admin_authenticated(query):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 self.show_admin_panel(query)
             elif path == "/admin_students":
                 if not self.is_admin_authenticated(query):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 self.show_admin_students(query)
             elif path == "/admin_dashboard":
                 if not self.is_admin_authenticated(query):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 self.show_admin_dashboard(query)
             elif path == "/export_credentials":
                 if not self.is_admin_authenticated(query):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 self.export_credentials_excel()
             else:
-                self.send_error(404, "Not Found")
+                self.show_info_page(
+                    "Page Not Found",
+                    "This URL is not part of the portal. Use the login page to continue.",
+                    "Go to Login",
+                    "/",
+                )
+        except PortalDataError:
+            self.redirect_login_notice("data")
         except Exception:
             self.send_error(500, "Unexpected server error")
 
@@ -180,7 +217,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     & (df["Password"].astype(str) == pw)
                 ]
                 if user.empty:
-                    self.send_error(403, "Invalid username or password")
+                    self.redirect_login_notice("invalid")
                     return
                 if has_student_submitted(username):
                     self.show_info_page(
@@ -198,10 +235,18 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 roll = str(form.getvalue("roll_no", "")).strip()
                 token = str(form.getvalue("auth_token", "")).strip()
                 if not self.is_student_authenticated(roll, token):
-                    self.send_error(401, "Session expired. Please login again.")
+                    self.redirect_login_notice("session")
                     return
                 if str(form.getvalue("confirm_submit", "")) != "yes":
-                    self.send_error(400, "Please confirm submission before uploading.")
+                    retry_url = self.student_url("/student_submit", roll, token)
+                    self.send_html(
+                        alert_retry_page(
+                            "Confirmation Required",
+                            "Please tick the confirmation checkbox before submitting your files.",
+                            "Final submission confirmation was not checked.",
+                            retry_url,
+                        )
+                    )
                     return
                 if has_student_submitted(roll):
                     SESSIONS.end_student_session(roll)
@@ -298,7 +343,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "update_settings":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 CONFIG["max_files"] = int(form.getvalue("max_files", 4))
                 self.redirect(self.admin_url("/admin_students", admin_token) + "#actions")
@@ -306,7 +351,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "update_paper_settings":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 try:
                     requested_count = int(form.getvalue("question_paper_count", 1))
@@ -323,7 +368,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "update_extensions":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
 
                 selected = {
@@ -341,7 +386,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "reset_user":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 roll_to_reset = str(form.getvalue("target_roll"))
                 df = load_data()
@@ -354,7 +399,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "reset_all_users":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 if str(form.getvalue("confirm_reset_all", "")) != "yes":
                     self.send_error(400, "Please confirm reset-all before submitting.")
@@ -368,7 +413,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "upload_question_paper":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 paper_types = self.current_paper_types()
                 missing = []
@@ -403,7 +448,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             elif action == "set_student_paper_type":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
                 if not SESSIONS.is_admin_authenticated(admin_token):
-                    self.send_error(401, "Admin login required")
+                    self.redirect_login_notice("session")
                     return
                 roll_to_set = str(form.getvalue("target_roll", "")).strip()
                 selected_type = str(form.getvalue("paper_type", "")).strip().upper()
@@ -414,13 +459,20 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 df = load_data()
                 mask = df["Roll No."].astype(str) == roll_to_set
                 if not mask.any():
-                    self.send_error(404, "Student not found.")
+                    self.show_info_page(
+                        "Student Not Found",
+                        "That roll number is not in the student roster.",
+                        "Back to Student Management",
+                        self.admin_url("/admin_students", admin_token),
+                    )
                     return
                 df.loc[mask, "Paper Type"] = selected_type
                 save_data(df)
                 self.redirect(self.admin_url("/admin_students", admin_token))
             else:
                 self.send_error(400, "Unsupported action")
+        except PortalDataError:
+            self.redirect_login_notice("data")
         except Exception:
             self.send_error(500, "Unexpected server error")
 
@@ -452,7 +504,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         roll = str(self.get_query_value(query, "roll", "")).strip()
         token = str(self.get_query_value(query, "token", "")).strip()
         if not self.is_student_authenticated(roll, token):
-            self.send_error(401, "Student login required")
+            self.redirect_login_notice("session")
             return
 
         assigned_paper_type = self.student_assigned_paper_type(roll)
@@ -502,19 +554,30 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         roll = str(self.get_query_value(query, "roll", "")).strip()
         token = str(self.get_query_value(query, "token", "")).strip()
         if not self.is_student_authenticated(roll, token):
-            self.send_error(401, "Student login required")
+            self.redirect_login_notice("session")
             return
 
         assigned_paper_type = self.student_assigned_paper_type(roll)
         requested_type = str(self.get_query_value(query, "type", "")).strip().upper()
         if requested_type and requested_type != assigned_paper_type:
-            self.send_error(403, "You are not allowed to access other paper types.")
+            self.show_info_page(
+                "Access Denied",
+                "You cannot open materials for a paper type other than the one assigned to you.",
+                "Back to Portal",
+                self.student_url("/student", roll, token),
+            )
             return
 
         filename = self.get_query_value(query, "file", "").strip()
         file_path = get_question_paper_file_path_for_type(assigned_paper_type, filename)
         if not file_path:
-            self.send_error(404, "Material file not found.")
+            self.show_info_page(
+                "File Not Found",
+                "That material file is missing, renamed, or not allowed. "
+                "Go back to the materials list and choose another file, or ask your instructor.",
+                "Back to Materials",
+                self.student_url("/question_paper", roll, token),
+            )
             return
 
         content_type, _ = mimetypes.guess_type(file_path)
@@ -524,6 +587,18 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         as_download = self.get_query_value(query, "download", "") == "1"
         disposition = "attachment" if as_download else "inline"
 
+        try:
+            with open(file_path, "rb") as file_handle:
+                payload = file_handle.read()
+        except OSError:
+            self.show_info_page(
+                "Could Not Read File",
+                "The file exists but could not be read from disk.",
+                "Back to Materials",
+                self.student_url("/question_paper", roll, token),
+            )
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header(
@@ -531,8 +606,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             f'{disposition}; filename="{os.path.basename(file_path)}"',
         )
         self.end_headers()
-        with open(file_path, "rb") as file_handle:
-            self.wfile.write(file_handle.read())
+        self.wfile.write(payload)
 
     def show_upload_page(self, roll, name, token):
         self.send_html(
@@ -549,7 +623,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         roll = str(self.get_query_value(query, "roll", "")).strip()
         token = str(self.get_query_value(query, "token", "")).strip()
         if not self.is_student_authenticated(roll, token):
-            self.send_error(401, "Session expired. Please login again.")
+            self.redirect_login_notice("session")
             return
         if has_student_submitted(roll):
             SESSIONS.end_student_session(roll)
@@ -563,7 +637,13 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         df = load_data()
         user = df[df["Roll No."].astype(str) == roll]
         if user.empty:
-            self.send_error(404, "Student not found")
+            SESSIONS.end_student_session(roll)
+            self.show_info_page(
+                "Student Record Not Found",
+                "Your roll number is not listed in the current student roster, or the roster changed while you were signed in. Please contact your administrator.",
+                "Return to Login",
+                "/",
+            )
             return
         name = str(user.iloc[0]["Student Name"])
         self.send_html(
@@ -579,7 +659,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         roll = str(self.get_query_value(query, "roll", "")).strip()
         token = str(self.get_query_value(query, "token", "")).strip()
         if not self.is_student_authenticated(roll, token):
-            self.send_error(401, "Session expired. Please login again.")
+            self.redirect_login_notice("session")
             return
         if has_student_submitted(roll):
             SESSIONS.end_student_session(roll)
@@ -593,7 +673,13 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         df = load_data()
         user = df[df["Roll No."].astype(str) == roll]
         if user.empty:
-            self.send_error(404, "Student not found")
+            SESSIONS.end_student_session(roll)
+            self.show_info_page(
+                "Student Record Not Found",
+                "Your roll number is not listed in the current student roster, or the roster changed while you were signed in. Please contact your administrator.",
+                "Return to Login",
+                "/",
+            )
             return
         self.show_upload_page(roll, user.iloc[0]["Student Name"], token)
 
@@ -727,8 +813,6 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             )
         )
 
-    def show_login_form(self):
-        self.send_html(login_page())
 
     def redirect(self, path):
         self.send_response(303)
@@ -742,6 +826,27 @@ class ReusableTCPServer(socketserver.TCPServer):
 
 def run_server():
     ensure_directories()
-    with ReusableTCPServer(("", PORT), SecureLabHandler) as httpd:
-        print(f"Portal Live: http://localhost:{PORT}")
-        httpd.serve_forever()
+    bind_host = os.environ.get("PORTAL_BIND", "")
+    bind_hint = (
+        bind_host
+        if bind_host.strip()
+        else "all interfaces (reachable from LAN; ensure firewall allows the port)"
+    )
+    try:
+        with ReusableTCPServer((bind_host, PORT), SecureLabHandler) as httpd:
+            _sock_host, sock_port = httpd.socket.getsockname()[:2]
+            print(f"Portal listening on {_sock_host!s}:{sock_port}")
+            print(f"Bind setting: {bind_hint}")
+            print(f"  This machine:  http://127.0.0.1:{sock_port}")
+            print(f"  Other devices: http://<this-computer-LAN-IP>:{sock_port}")
+            if bind_host.strip() == "127.0.0.1":
+                print(
+                    "  WARNING: PORTAL_BIND=127.0.0.1 — only localhost can connect; "
+                    "unset PORTAL_BIND to allow LAN access."
+                )
+            if sys.platform.startswith("win"):
+                print("Tip (Windows): use python server.py if python3 is not on your PATH.")
+            httpd.serve_forever()
+    except OSError as exc:
+        print(f"Could not start server on port {PORT}: {exc}")
+        raise SystemExit(1) from exc

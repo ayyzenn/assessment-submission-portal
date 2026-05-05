@@ -13,6 +13,10 @@ from .portal_config import (
 from .portal_security import generate_password
 
 
+class PortalDataError(Exception):
+    """Raised when student roster Excel cannot be read or written reliably."""
+
+
 def ensure_directories() -> None:
     os.makedirs(UPLOAD_BASE_DIR, exist_ok=True)
     os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
@@ -68,29 +72,43 @@ def ensure_valid_paper_types(df: pd.DataFrame, paper_types: list[str]) -> pd.Dat
 
 
 def load_data() -> pd.DataFrame:
-    if not os.path.exists(EXCEL_FILE):
-        pd.DataFrame(
-            {"Roll No.": ["101"], "Student Name": ["Student 1"], "Password": [""]}
-        ).to_excel(EXCEL_FILE, index=False)
+    try:
+        if not os.path.exists(EXCEL_FILE):
+            pd.DataFrame(
+                {"Roll No.": ["101"], "Student Name": ["Student 1"], "Password": [""]}
+            ).to_excel(EXCEL_FILE, index=False)
 
-    df = normalize_student_data(pd.read_excel(EXCEL_FILE))
-    missing_pw_mask = df["Password"].astype(str).str.strip() == ""
-    if missing_pw_mask.any():
-        for idx in df[missing_pw_mask].index:
-            df.at[idx, "Password"] = generate_password()
-        df.to_excel(EXCEL_FILE, index=False)
-    return df
+        df = normalize_student_data(pd.read_excel(EXCEL_FILE))
+        missing_pw_mask = df["Password"].astype(str).str.strip() == ""
+        if missing_pw_mask.any():
+            for idx in df[missing_pw_mask].index:
+                df.at[idx, "Password"] = generate_password()
+            df.to_excel(EXCEL_FILE, index=False)
+        return df
+    except PortalDataError:
+        raise
+    except Exception as exc:
+        raise PortalDataError(
+            f"Unable to load or initialize {EXCEL_FILE!r}. "
+            "Ensure the file exists, is not open elsewhere, and is a valid .xlsx."
+        ) from exc
 
 
 def save_data(df: pd.DataFrame) -> None:
-    df.to_excel(EXCEL_FILE, index=False)
+    try:
+        df.to_excel(EXCEL_FILE, index=False)
+    except Exception as exc:
+        raise PortalDataError(f"Unable to save {EXCEL_FILE!r}: {exc}") from exc
 
 
 def load_logs() -> pd.DataFrame:
     if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
         return pd.DataFrame(columns=["Roll No.", "IP Address"])
 
-    logs = pd.read_csv(LOG_FILE)
+    try:
+        logs = pd.read_csv(LOG_FILE)
+    except Exception:
+        return pd.DataFrame(columns=["Roll No.", "IP Address"])
     if "Roll No." not in logs.columns:
         logs["Roll No."] = ""
     if "IP Address" not in logs.columns:

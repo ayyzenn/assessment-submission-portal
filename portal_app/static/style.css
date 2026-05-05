@@ -111,6 +111,26 @@ body {
   gap: 10px;
 }
 
+.login-notice {
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.login-notice-error {
+  background: color-mix(in srgb, #fef2f2 92%, #dc2626 8%);
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.theme-dark .login-notice-error {
+  background: color-mix(in srgb, var(--card-bg) 88%, #dc2626 12%);
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+
 .title {
   margin: 0 0 12px 0;
   font-size: 1.35rem;

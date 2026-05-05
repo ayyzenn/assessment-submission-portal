@@ -1,3 +1,6 @@
+import html
+
+
 def _page(title: str, body_html: str, auto_refresh_seconds: int | None = None) -> str:
     refresh = (
         f'<meta http-equiv="refresh" content="{auto_refresh_seconds}">'
@@ -122,10 +125,30 @@ def upload_success_page(roll, uploaded_files):
     )
 
 
-def login_page():
+LOGIN_NOTICE_TEXT = {
+    "invalid": "Incorrect username or password. Please check both fields and try again.",
+    "session": "Your session expired or you are not signed in. Please log in again.",
+    "data": (
+        "Student list could not be loaded. Ensure students.xlsx exists in the server folder, "
+        "is not open in Excel elsewhere, and is a valid .xlsx file."
+    ),
+    "assets": "A required site file is missing on the server. Ask your administrator to reinstall or redeploy the portal.",
+}
+
+
+def login_page(notice: str = ""):
+    notice_key = (notice or "").strip().lower()
+    banner_html = ""
+    if notice_key in LOGIN_NOTICE_TEXT:
+        banner_html = (
+            f'<div class="login-notice login-notice-error" role="alert">'
+            f"{html.escape(LOGIN_NOTICE_TEXT[notice_key])}"
+            f"</div>"
+        )
+
     return _page(
         "Assessment Submission Portal",
-        """
+        f"""
         <body class="bg-center">
             <div class="login-shell">
                 <div class="card login-info-card">
@@ -137,11 +160,12 @@ def login_page():
                         <div><b>Student username format:</b> Roll number</div>
                         <div class="small muted">Example: <b>20P-0051</b></div>
                     </div>
-                    <div class="small muted">Use the password shared by your teacher/admin.</div>
+                    <div class="small muted">Admin users sign in with the administrator username and password.</div>
                 </div>
 
                 <div class="card login-card">
                     <h3 class="title">Sign In</h3>
+                    {banner_html}
                     <form method="POST" class="login-form">
                         <input type="hidden" name="action" value="login">
                         <label for="login-username"><b>Username</b></label>
@@ -160,14 +184,14 @@ def login_page():
                 </div>
             </div>
             <script>
-                (function() {
+                (function() {{
                     const input = document.getElementById("login-password");
                     const toggle = document.getElementById("show-password-toggle");
                     if (!input || !toggle) return;
-                    toggle.addEventListener("change", function() {
+                    toggle.addEventListener("change", function() {{
                         input.type = toggle.checked ? "text" : "password";
-                    });
-                })();
+                    }});
+                }})();
             </script>
         </body>
         """,
