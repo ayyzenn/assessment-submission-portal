@@ -1,4 +1,5 @@
 import time
+from threading import RLock
 
 from .portal_config import SESSION_TTL_SECONDS
 from .portal_security import create_session_token
@@ -8,6 +9,7 @@ class SessionStore:
     def __init__(self) -> None:
         self._admin_tokens = {}
         self._student_tokens = {}
+        self._lock = RLock()
 
     def _now(self) -> float:
         return time.time()
@@ -22,25 +24,30 @@ class SessionStore:
         }
 
     def create_admin_session(self) -> str:
-        self._prune()
-        token = create_session_token()
-        self._admin_tokens[token] = self._now() + SESSION_TTL_SECONDS
-        return token
+        with self._lock:
+            self._prune()
+            token = create_session_token()
+            self._admin_tokens[token] = self._now() + SESSION_TTL_SECONDS
+            return token
 
     def is_admin_authenticated(self, token: str) -> bool:
-        self._prune()
-        return bool(token) and token in self._admin_tokens
+        with self._lock:
+            self._prune()
+            return bool(token) and token in self._admin_tokens
 
     def create_student_session(self, roll: str) -> str:
-        self._prune()
-        token = create_session_token()
-        self._student_tokens[str(roll)] = (token, self._now() + SESSION_TTL_SECONDS)
-        return token
+        with self._lock:
+            self._prune()
+            token = create_session_token()
+            self._student_tokens[str(roll)] = (token, self._now() + SESSION_TTL_SECONDS)
+            return token
 
     def is_student_authenticated(self, roll: str, token: str) -> bool:
-        self._prune()
-        current = self._student_tokens.get(str(roll))
-        return bool(current and token and current[0] == token)
+        with self._lock:
+            self._prune()
+            current = self._student_tokens.get(str(roll))
+            return bool(current and token and current[0] == token)
 
     def end_student_session(self, roll: str) -> None:
-        self._student_tokens.pop(str(roll), None)
+        with self._lock:
+            self._student_tokens.pop(str(roll), None)

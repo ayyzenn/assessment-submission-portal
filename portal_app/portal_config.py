@@ -10,9 +10,9 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
 PASSWORD_LENGTH = 8
-SESSION_TTL_SECONDS = 2 * 60 * 60
+SESSION_TTL_SECONDS = 3 * 60 * 60
 
-ALLOWED_EXTENSIONS = {".txt", ".pdf"} # Allowed extensions for the submissions
+ALLOWED_EXTENSIONS = {".txt", ".pdf"} # Allowed extensions for the submissions by default
 
 AVAILABLE_EXTENSIONS = sorted(
     {

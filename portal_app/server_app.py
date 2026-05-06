@@ -117,10 +117,21 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         return assigned
 
     def send_html(self, html):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(html.encode())
+        try:
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(html.encode())
+            return True
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            # Client closed socket before response body completed.
+            return False
+
+    def send_error_safe(self, code, message):
+        try:
+            self.send_error(code, message)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
 
     def serve_static_css(self):
         base_dir = os.path.dirname(__file__)
@@ -139,8 +150,11 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/css; charset=utf-8")
         self.end_headers()
-        with open(css_path, "rb") as file_handle:
-            self.wfile.write(file_handle.read())
+        try:
+            with open(css_path, "rb") as file_handle:
+                self.wfile.write(file_handle.read())
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
 
     def show_info_page(self, title, message, action_text="Return to Login", action_href="/"):
         self.send_html(info_page(title, message, action_text, action_href))
@@ -203,8 +217,10 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 )
         except PortalDataError:
             self.redirect_login_notice("data")
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
         except Exception:
-            self.send_error(500, "Unexpected server error")
+            self.send_error_safe(500, "Unexpected server error")
 
     def do_POST(self):
         self._portal_post_close = True
@@ -487,8 +503,10 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(400, "Unsupported action")
         except PortalDataError:
             self.redirect_login_notice("data")
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
         except Exception:
-            self.send_error(500, "Unexpected server error")
+            self.send_error_safe(500, "Unexpected server error")
         finally:
             self._portal_post_close = False
 
@@ -882,8 +900,10 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
-class ReusableTCPServer(socketserver.TCPServer):
+class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
+    daemon_threads = True
+    request_queue_size = 256
 
 
 def run_server():

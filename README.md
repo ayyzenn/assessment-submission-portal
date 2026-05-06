@@ -1,83 +1,80 @@
 # Assessment Submission Portal
 
-A local, secure, and student-friendly submission portal built with Python.
+Lightweight local/LAN portal for exam material delivery and one-time student submissions.
 
-It supports admin and student workflows, multi-material question paper delivery, one-time submissions, configurable file-type controls, IP-level anti-duplicate protection, and a clean UI with dark mode.
+This project is designed for real classroom/lab use with many concurrent logins. Recent performance hardening includes:
+
+- Multithreaded request handling for parallel clients
+- Thread-safe in-memory cache for `students.xlsx` to reduce repeated Excel reads
+- Session operations made thread-safe for concurrent requests
 
 ---
 
 ## Features
 
-- Admin and student login flow
-- Admin upload for question paper + multiple supporting materials
-- Student material listing with open/download actions
-- One-time final submission (no re-upload)
-- One submission per IP address (different roll numbers from same IP are blocked)
-- Admin student management, dashboard, and credential export
-- Configurable max file limit and allowed extensions
-- Strict upload validation with clear retry alerts
-- Submission success page shows exact uploaded filename(s)
-- Dark/Light mode toggle
+- Admin and student authentication flow
+- Multi-paper-type question material delivery (A/B/C...)
+- Student one-time final submission flow
+- Per-IP anti-duplicate submission protection
+- Admin tools:
+  - paper setup and uploads
+  - student management
+  - submission dashboard
+  - credential export
+- Configurable upload rules (max files + allowed extensions)
+- Built-in mini games (Snake + Flappy Bird) for students
+- Dark/light mode UI toggle
 
 ---
 
 ## Project Structure
 
-- `server.py` - launcher entry point
-- `portal_app/server_app.py` - routes and request handling
-- `portal_app/portal_config.py` - config and constants
-- `portal_app/portal_data.py` - Excel/log/file operations
-- `portal_app/portal_security.py` - password and token utilities
-- `portal_app/portal_sessions.py` - session lifecycle
-- `portal_app/portal_templates.py` - HTML templates
-- `portal_app/static/style.css` - shared styles
-- `portal_app/requirements.txt` - dependencies
-- `submission_ip_track.txt` - IP usage tracker for accepted submissions
+- `server.py`: launcher entry point
+- `portal_app/server_app.py`: HTTP routes, request handlers, server startup
+- `portal_app/portal_data.py`: roster/questions/submission file I/O
+- `portal_app/portal_config.py`: constants and runtime config defaults
+- `portal_app/portal_sessions.py`: admin/student session store
+- `portal_app/portal_templates.py`: rendered HTML pages
+- `portal_app/static/style.css`: shared styles
+- `portal_app/requirements.txt`: Python dependencies
+- `students.xlsx`: student roster + passwords + paper type assignments
+- `submissions/`: uploaded student files (organized per roll no.)
+- `question_paper/`: uploaded exam materials (organized per paper type)
+- `submission_logs.csv`: timestamped submission activity
+- `submission_ip_track.txt`: accepted IP-to-roll tracking
 
 ---
 
 ## Prerequisites
 
-- Python 3.10+ recommended
+- Python `3.10+`
 - `pip`
+- Same LAN for server machine and student devices
 
 ---
 
-## Setup (Recommended: Virtual Environment)
+## Setup
 
-### 1) Go to project folder
+### 1) Open project directory
 
 ```bash
 cd /home/ayyzenn/Desktop/server
 ```
 
-### 2) Create virtual environment
+### 2) Create and activate virtual environment
 
 ```bash
 python3 -m venv .env
-```
-
-### 3) Activate virtual environment
-
-On Linux/macOS:
-
-```bash
 source .env/bin/activate
 ```
 
-On Windows (PowerShell):
+Windows PowerShell:
 
 ```powershell
 .env\Scripts\Activate.ps1
 ```
 
-On Windows (CMD):
-
-```cmd
-.env\Scripts\activate.bat
-```
-
-### 4) Install dependencies
+### 3) Install dependencies
 
 ```bash
 pip install -r portal_app/requirements.txt
@@ -85,107 +82,209 @@ pip install -r portal_app/requirements.txt
 
 ---
 
-## Run the Portal
-
-From the project directory:
+## Run the Server
 
 ```bash
 python3 server.py
 ```
 
-On some Windows setups, use:
+If needed on Windows:
 
 ```cmd
 python server.py
 ```
 
-Open in browser on **this machine**:
+Default URL on host machine:
 
-- [http://localhost:8080](http://localhost:8080)
+- [http://127.0.0.1:8080](http://127.0.0.1:8080)
 
-**Binding:** By default the server listens on **all network interfaces**, so other PCs on your LAN can connect using `http://<this-computer-IP>:8080`.
+LAN URL for students:
 
-To listen on **localhost only** (no LAN access):
+- `http://<server-lan-ip>:8080`
+
+If you intentionally want localhost-only mode:
 
 ```bash
 PORTAL_BIND=127.0.0.1 python3 server.py
 ```
 
-If `PORTAL_BIND=127.0.0.1` is set in your environment, remove it for LAN access.
+---
+
+## Admin Point of View (Full Runbook)
+
+### Before exam day
+
+1. Ensure `students.xlsx` exists in project root with at least:
+   - `Roll No.`
+   - `Student Name`
+2. Start server and verify login page loads on host machine.
+3. Login as admin with default credentials (change in code if needed):
+   - Username: `admin`
+   - Password: `admin123`
+4. Open Admin Home:
+   - Set paper type count (A/B/C...) if required.
+   - Upload all question materials for each paper type.
+5. Open Student Management:
+   - Verify each student row exists.
+   - Confirm paper type assignment.
+   - Configure max files and allowed extensions.
+6. Open Dashboard:
+   - Confirm page refreshes and statuses load normally.
+
+### During exam
+
+1. Keep server terminal open; do not close it.
+2. Share LAN URL with students.
+3. Monitor `Dashboard` for submission status.
+4. If needed, use student password reset actions from admin panel.
+5. Use `Export Credentials` when required by invigilation process.
+
+### After exam
+
+1. Collect files from `submissions/<roll-no>/`.
+2. Optionally archive:
+   - `submissions/`
+   - `submission_logs.csv`
+   - `submission_ip_track.txt`
+3. Stop server with `Ctrl+C`.
 
 ---
 
-## Access from another PC on the LAN (e.g. 172.16.4.x)
+## Student Point of View
 
-1. Start the portal **without** `PORTAL_BIND=127.0.0.1`.
-2. On the server machine, check its IP: `ip a` or `hostname -I`.
-3. On the **other** device use `http://172.16.4.<server>:8080` (adjust IP/port).
-4. If that fails while `http://127.0.0.1:8080` works on the server itself, it is almost always **firewall**, **wrong subnet**, or **AP/client isolation** on Wi‑Fi — not the Python code.
-
-### Check that the port is open on the server
-
-```bash
-ss -tlnp | grep 8080
-```
-
-You should see `0.0.0.0:8080` or `*:8080`. If you only see `127.0.0.1:8080`, LAN clients cannot connect (fix `PORTAL_BIND` or how you start the server).
-
-### Linux firewall (examples)
-
-**nftables** (common on Arch) — inspect rules, then allow TCP 8080 if needed (chain names vary):
-
-```bash
-sudo nft list ruleset | less
-```
-
-**firewalld**:
-
-```bash
-sudo firewall-cmd --add-port=8080/tcp --permanent && sudo firewall-cmd --reload
-```
-
-**ufw**:
-
-```bash
-sudo ufw allow 8080/tcp comment 'portal' && sudo ufw reload
-```
-
-### Windows
-
-Windows Defender Firewall → Advanced → Inbound rules → New rule → TCP → port **8080** → Allow.
+1. Open portal URL shared by admin.
+2. Login using:
+   - Username: roll number (example `20P-0051`)
+   - Password: assigned password
+3. On student home:
+   - Click `View Materials` to open/download question files.
+   - Click `Submit Solution` to upload final files.
+   - Optional: click `Play Game` for mini games.
+4. On submission page:
+   - Select files (respect extension and count rules)
+   - Tick confirmation checkbox
+   - Submit once (final submission is one-time only)
+5. Successful upload page confirms submitted file names.
 
 ---
 
-## Linux, macOS, and Windows
+## Performance & Scale Notes (Important)
 
-The portal uses Python’s standard library and `os.path`, so it runs on typical Linux distributions (including Ubuntu and Arch), macOS, and Windows. Use a virtual environment on any OS, then install dependencies from `portal_app/requirements.txt` as shown above.
+The server is now suitable for high-concurrency classroom bursts, but these operating practices are still important:
+
+- Use wired LAN for host machine if possible.
+- Keep project on local SSD (not network drive).
+- Keep `students.xlsx` local and not open in Excel during exam.
+- Avoid heavy background CPU tasks on host machine.
+- Avoid scanning/backup tools that lock files during exam window.
+- Keep one server instance running (do not start multiple on same port).
+
+Recommended pre-exam stress test:
+
+1. Start server.
+2. Open 20-40 parallel browser sessions (or use multiple devices).
+3. Test simultaneous login and navigation.
+4. Resolve network/firewall issues before exam day.
 
 ---
 
-## Default Admin Credentials
+## LAN and Firewall Checklist
 
-- Username: `admin`
-- Password: `admin123`
+### Verify binding and listening port
+
+```bash
+ss -tlnp | rg 8080
+```
+
+Expected: `0.0.0.0:8080` or `*:8080`.
+
+### Find server LAN IP
+
+```bash
+hostname -I
+```
+
+### UFW (if enabled)
+
+```bash
+sudo ufw allow 8080/tcp comment 'portal'
+sudo ufw reload
+sudo ufw status verbose
+```
+
+### firewalld
+
+```bash
+sudo firewall-cmd --add-port=8080/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+### nftables inspection
+
+```bash
+sudo nft list ruleset
+```
 
 ---
 
-## Notes
+## Logs, Data, and What They Mean
 
-- Wrong username/password shows a clear message **on the login page** (no raw browser credential error page); applies to admin and student accounts.
-- Expired or missing sessions redirect back to login with a short explanation.
-- If `students.xlsx` cannot be read or saved, you get a login-page hint instead of an unexplained server error.
-- Missing question material files show a friendly page with a link back to the materials list.
-- Keep `students.xlsx` in project root with at least:
-  - `Roll No.`
-  - `Student Name`
-- Folders like `question_paper/` and `submissions/` are auto-created if missing.
-- `submission_ip_track.txt` is auto-created and stores one accepted submission IP per line.
-- IP protection behavior:
-  - Same student trying again -> blocked by one-time submission rule first.
-  - Different student from already-used IP -> blocked with IP reuse message.
-- For best reliability, always run inside the virtual environment.
+- `students.xlsx`: source of truth for student records and passwords
+- `submission_logs.csv`: append-only submission timestamps and IPs
+- `submission_ip_track.txt`: first accepted roll number per IP
+- `submissions/`: actual uploaded student files
+- `question_paper/type_<x>/`: files students can view/download
 
-### Slow login or long waits on each click
+---
 
-- **Fixed in code:** the server no longer performs reverse DNS lookups for client IPs (that often causes multi‑second delays on LAN addresses like `172.16.x.x`).
-- If it is still slow: keep `students.xlsx` reasonably small, avoid storing it on a slow/network drive, and temporarily exclude the project folder from aggressive antivirus “scan every read” if you see disk thrashing.
+## Configuration / Customization
+
+Edit `portal_app/portal_config.py` to modify:
+
+- `PORT` (default 8080)
+- session TTL
+- extension allowlist defaults
+- admin credentials
+
+Edit `portal_app/portal_templates.py` for page/UI behavior.
+
+Edit `portal_app/static/style.css` for styling.
+
+---
+
+## Troubleshooting
+
+### Symptom: students get timeout or long delay
+
+Check in this order:
+
+1. Host machine can open `http://127.0.0.1:8080`.
+2. `ss -tlnp | rg 8080` shows listening on non-localhost.
+3. Firewall allows TCP 8080.
+4. Server and clients are on same subnet / no AP isolation.
+5. `students.xlsx` is not open by another app.
+
+### Symptom: localhost itself feels slow
+
+Most common causes:
+
+- file lock/slow disk access on `students.xlsx`
+- antivirus/backup scanning project directory
+- multiple apps saturating CPU/disk
+
+### Symptom: student cannot re-submit
+
+Expected behavior: one-time final submission is enforced.
+
+### Symptom: two students on same NAT IP blocked
+
+Expected behavior by current policy: one accepted roll number per IP.
+
+---
+
+## Security Notes
+
+- Use a trusted exam network.
+- Rotate admin password before real exam sessions.
+- Backup project folder before exam.
+- Do not expose this service directly to public internet.

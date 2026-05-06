@@ -1,4 +1,5 @@
 import os
+from threading import RLock
 from typing import Optional
 
 import pandas as pd
@@ -15,6 +16,11 @@ from .portal_security import generate_password
 
 class PortalDataError(Exception):
     """Raised when student roster Excel cannot be read or written reliably."""
+
+
+_DATA_CACHE_LOCK = RLock()
+_DATA_CACHE_DF: Optional[pd.DataFrame] = None
+_DATA_CACHE_MTIME: Optional[float] = None
 
 
 def ensure_directories() -> None:
@@ -72,19 +78,33 @@ def ensure_valid_paper_types(df: pd.DataFrame, paper_types: list[str]) -> pd.Dat
 
 
 def load_data() -> pd.DataFrame:
+    global _DATA_CACHE_DF, _DATA_CACHE_MTIME
     try:
-        if not os.path.exists(EXCEL_FILE):
-            pd.DataFrame(
-                {"Roll No.": ["101"], "Student Name": ["Student 1"], "Password": [""]}
-            ).to_excel(EXCEL_FILE, index=False)
+        with _DATA_CACHE_LOCK:
+            if not os.path.exists(EXCEL_FILE):
+                pd.DataFrame(
+                    {"Roll No.": ["101"], "Student Name": ["Student 1"], "Password": [""]}
+                ).to_excel(EXCEL_FILE, index=False)
 
-        df = normalize_student_data(pd.read_excel(EXCEL_FILE))
-        missing_pw_mask = df["Password"].astype(str).str.strip() == ""
-        if missing_pw_mask.any():
-            for idx in df[missing_pw_mask].index:
-                df.at[idx, "Password"] = generate_password()
-            df.to_excel(EXCEL_FILE, index=False)
-        return df
+            current_mtime = os.path.getmtime(EXCEL_FILE)
+            if (
+                _DATA_CACHE_DF is not None
+                and _DATA_CACHE_MTIME is not None
+                and current_mtime == _DATA_CACHE_MTIME
+            ):
+                return _DATA_CACHE_DF.copy(deep=True)
+
+            df = normalize_student_data(pd.read_excel(EXCEL_FILE))
+            missing_pw_mask = df["Password"].astype(str).str.strip() == ""
+            if missing_pw_mask.any():
+                for idx in df[missing_pw_mask].index:
+                    df.at[idx, "Password"] = generate_password()
+                df.to_excel(EXCEL_FILE, index=False)
+                current_mtime = os.path.getmtime(EXCEL_FILE)
+
+            _DATA_CACHE_DF = df.copy(deep=True)
+            _DATA_CACHE_MTIME = current_mtime
+            return df
     except PortalDataError:
         raise
     except Exception as exc:
@@ -95,8 +115,13 @@ def load_data() -> pd.DataFrame:
 
 
 def save_data(df: pd.DataFrame) -> None:
+    global _DATA_CACHE_DF, _DATA_CACHE_MTIME
     try:
-        df.to_excel(EXCEL_FILE, index=False)
+        with _DATA_CACHE_LOCK:
+            normalized = normalize_student_data(df.copy(deep=True))
+            normalized.to_excel(EXCEL_FILE, index=False)
+            _DATA_CACHE_DF = normalized.copy(deep=True)
+            _DATA_CACHE_MTIME = os.path.getmtime(EXCEL_FILE)
     except Exception as exc:
         raise PortalDataError(f"Unable to save {EXCEL_FILE!r}: {exc}") from exc
 
