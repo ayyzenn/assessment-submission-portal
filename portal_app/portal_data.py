@@ -6,6 +6,7 @@ import pandas as pd
 
 from .portal_config import (
     EXCEL_FILE,
+    GAME_LEADERBOARD_FILE,
     IP_TRACK_FILE,
     LOG_FILE,
     QUESTION_PAPER_DIR,
@@ -21,6 +22,7 @@ class PortalDataError(Exception):
 _DATA_CACHE_LOCK = RLock()
 _DATA_CACHE_DF: Optional[pd.DataFrame] = None
 _DATA_CACHE_MTIME: Optional[float] = None
+_GAME_SCORE_LOCK = RLock()
 
 
 def ensure_directories() -> None:
@@ -29,6 +31,10 @@ def ensure_directories() -> None:
     if not os.path.exists(IP_TRACK_FILE):
         with open(IP_TRACK_FILE, "a", encoding="utf-8"):
             pass
+    if not os.path.exists(GAME_LEADERBOARD_FILE):
+        pd.DataFrame(columns=["Game", "Roll No.", "Score", "Updated At"]).to_csv(
+            GAME_LEADERBOARD_FILE, index=False
+        )
 
 
 def normalize_student_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -364,3 +370,80 @@ def save_question_paper_files_for_type(paper_type: str, uploaded_items) -> int:
             out.write(item.file.read())
         saved_count += 1
     return saved_count
+
+
+def _load_game_scores() -> pd.DataFrame:
+    if not os.path.exists(GAME_LEADERBOARD_FILE) or os.path.getsize(GAME_LEADERBOARD_FILE) == 0:
+        return pd.DataFrame(columns=["Game", "Roll No.", "Score", "Updated At"])
+    try:
+        df = pd.read_csv(GAME_LEADERBOARD_FILE)
+    except Exception:
+        return pd.DataFrame(columns=["Game", "Roll No.", "Score", "Updated At"])
+    if "Game" not in df.columns:
+        df["Game"] = ""
+    if "Roll No." not in df.columns:
+        df["Roll No."] = ""
+    if "Score" not in df.columns:
+        df["Score"] = 0
+    if "Updated At" not in df.columns:
+        df["Updated At"] = ""
+    df["Game"] = df["Game"].fillna("").astype(str).str.strip().str.lower()
+    df["Roll No."] = df["Roll No."].fillna("").astype(str).str.strip()
+    df["Score"] = pd.to_numeric(df["Score"], errors="coerce").fillna(0).astype(int)
+    df["Updated At"] = df["Updated At"].fillna("").astype(str)
+    return df
+
+
+def update_game_score(game: str, roll: str, score: int) -> None:
+    game_clean = str(game or "").strip().lower()
+    roll_clean = str(roll or "").strip()
+    score_value = int(score or 0)
+    if game_clean not in {"snake", "flappy"} or not roll_clean or score_value < 1:
+        return
+
+    with _GAME_SCORE_LOCK:
+        df = _load_game_scores()
+        mask = (df["Game"] == game_clean) & (df["Roll No."] == roll_clean)
+        now_str = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        if mask.any():
+            old_best = int(df.loc[mask, "Score"].max())
+            if score_value > old_best:
+                df.loc[mask, "Score"] = score_value
+                df.loc[mask, "Updated At"] = now_str
+        else:
+            df = pd.concat(
+                [
+                    df,
+                    pd.DataFrame(
+                        [
+                            {
+                                "Game": game_clean,
+                                "Roll No.": roll_clean,
+                                "Score": score_value,
+                                "Updated At": now_str,
+                            }
+                        ]
+                    ),
+                ],
+                ignore_index=True,
+            )
+        df.to_csv(GAME_LEADERBOARD_FILE, index=False)
+
+
+def get_game_leaderboard(game: str, limit: int = 20) -> list[dict]:
+    game_clean = str(game or "").strip().lower()
+    if game_clean not in {"snake", "flappy"}:
+        return []
+    with _GAME_SCORE_LOCK:
+        df = _load_game_scores()
+        game_df = df[(df["Game"] == game_clean) & (df["Score"] >= 1)].copy()
+    if game_df.empty:
+        return []
+    game_df["Updated Sort"] = pd.to_datetime(game_df["Updated At"], errors="coerce")
+    game_df = game_df.sort_values(
+        by=["Score", "Updated Sort"], ascending=[False, True], kind="mergesort"
+    )
+    rows = []
+    for idx, (_, row) in enumerate(game_df.head(max(1, int(limit))).iterrows(), start=1):
+        rows.append({"rank": idx, "roll": str(row["Roll No."]), "score": int(row["Score"])})
+    return rows

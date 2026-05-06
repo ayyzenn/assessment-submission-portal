@@ -101,7 +101,7 @@ def alert_retry_page(title, message, alert_text, retry_href):
 
 
 def upload_success_page(roll, uploaded_files):
-    items = "".join(f"<li>{name}</li>" for name in uploaded_files)
+    items = "".join(f"{name}<br>" for name in uploaded_files)
     file_count = len(uploaded_files)
     file_names_inline = ", ".join(uploaded_files)
     file_label = "file" if file_count == 1 else "files"
@@ -119,10 +119,6 @@ def upload_success_page(roll, uploaded_files):
                     <div><b>Files Submitted:</b> {file_count} {file_label}</div>
                     <div><b>File Name(s):</b> {file_names_inline}</div>
                 </div>
-                <p class="muted"><b>Submitted Files</b></p>
-                <ul class="success-file-list">
-                    {items}
-                </ul>
                 <p class="small muted">Your session has been closed for security.</p>
                 <a class="btn-link btn-primary" href="/">Return to Login</a>
             </div>
@@ -224,7 +220,7 @@ def student_home_page(name, roll, view_qp_url, submit_url, games_url):
         "Student Portal",
         f"""
         <body class="bg-soft">
-            <div class="container-student">
+            <div class="container-student container-games">
                 <div class="panel-head">
                     <h2 class="title">Student Assessment Portal</h2>
                     <p class="muted text-on-dark no-margin">Welcome, {name} ({roll})</p>
@@ -273,45 +269,71 @@ def student_games_page(name, roll, token):
                     </div>
 
                     <section class="game-panel" id="game-panel-snake">
-                        <h3 class="section-title">Snake</h3>
-                        <p class="small muted">Controls: Arrow keys. Press <b>Space</b> to restart after game over.</p>
-                        <div class="game-scoreboard" aria-live="polite">
-                            <div class="score-chip">
-                                <span class="score-chip-label">Score</span>
-                                <span class="score-chip-value" id="snake-score">0</span>
+                        <div class="game-layout">
+                            <div class="game-main">
+                                <h3 class="section-title">Snake</h3>
+                                <p class="small muted">Controls: Arrow keys. Press <b>Space</b> to restart after game over.</p>
+                                <div class="game-scoreboard" aria-live="polite">
+                                    <div class="score-chip">
+                                        <span class="score-chip-label">Score</span>
+                                        <span class="score-chip-value" id="snake-score">0</span>
+                                    </div>
+                                    <div class="score-chip score-chip-best">
+                                        <span class="score-chip-label">High Score</span>
+                                        <span class="score-chip-value" id="snake-high-score">0</span>
+                                    </div>
+                                </div>
+                                <canvas id="snake-canvas" class="game-canvas" width="560" height="560"></canvas>
                             </div>
-                            <div class="score-chip score-chip-best">
-                                <span class="score-chip-label">High Score</span>
-                                <span class="score-chip-value" id="snake-high-score">0</span>
+                            <div class="leaderboard-wrap">
+                                <h4 class="leaderboard-title">Snake Leaderboard</h4>
+                                <ol id="snake-leaderboard" class="leaderboard-list">
+                                    <li class="leaderboard-empty">No scores yet. Be the first to score.</li>
+                                </ol>
                             </div>
                         </div>
-                        <canvas id="snake-canvas" class="game-canvas" width="420" height="420"></canvas>
                     </section>
 
                     <section class="game-panel" id="game-panel-flappy" hidden>
-                        <h3 class="section-title">Flappy Bird</h3>
-                        <p class="small muted">Controls: Press <b>Space</b> to flap. Press <b>Space</b> again after game over to restart.</p>
-                        <div class="game-scoreboard" aria-live="polite">
-                            <div class="score-chip">
-                                <span class="score-chip-label">Score</span>
-                                <span class="score-chip-value" id="flappy-score">0</span>
+                        <div class="game-layout">
+                            <div class="game-main">
+                                <h3 class="section-title">Flappy Bird</h3>
+                                <p class="small muted">Controls: Press <b>Space</b> to flap. Press <b>Space</b> again after game over to restart.</p>
+                                <div class="game-scoreboard" aria-live="polite">
+                                    <div class="score-chip">
+                                        <span class="score-chip-label">Score</span>
+                                        <span class="score-chip-value" id="flappy-score">0</span>
+                                    </div>
+                                    <div class="score-chip score-chip-best">
+                                        <span class="score-chip-label">High Score</span>
+                                        <span class="score-chip-value" id="flappy-high-score">0</span>
+                                    </div>
+                                </div>
+                                <canvas id="flappy-canvas" class="game-canvas game-canvas-wide" width="860" height="420"></canvas>
                             </div>
-                            <div class="score-chip score-chip-best">
-                                <span class="score-chip-label">High Score</span>
-                                <span class="score-chip-value" id="flappy-high-score">0</span>
+                            <div class="leaderboard-wrap">
+                                <h4 class="leaderboard-title">Flappy Bird Leaderboard</h4>
+                                <ol id="flappy-leaderboard" class="leaderboard-list">
+                                    <li class="leaderboard-empty">No scores yet. Be the first to score.</li>
+                                </ol>
                             </div>
                         </div>
-                        <canvas id="flappy-canvas" class="game-canvas game-canvas-wide" width="520" height="320"></canvas>
                     </section>
                 </div>
             </div>
 
             <script>
                 (function () {{
+                    const studentRoll = "{roll}";
+                    const studentToken = "{token}";
                     const tabButtons = document.querySelectorAll(".game-tab-btn");
                     const panels = {{
                         snake: document.getElementById("game-panel-snake"),
                         flappy: document.getElementById("game-panel-flappy"),
+                    }};
+                    const leaderboardEls = {{
+                        snake: document.getElementById("snake-leaderboard"),
+                        flappy: document.getElementById("flappy-leaderboard"),
                     }};
                     let activeGame = "snake";
 
@@ -333,6 +355,84 @@ def student_games_page(name, roll, token):
                     }});
 
                     showGame("snake");
+
+                    function leaderboardItemClass(rank) {{
+                        if (rank === 1) return "leaderboard-item rank-gold";
+                        if (rank === 2) return "leaderboard-item rank-silver";
+                        if (rank === 3) return "leaderboard-item rank-bronze";
+                        return "leaderboard-item";
+                    }}
+
+                    function escapeHtml(value) {{
+                        return String(value)
+                            .replaceAll("&", "&amp;")
+                            .replaceAll("<", "&lt;")
+                            .replaceAll(">", "&gt;")
+                            .replaceAll('"', "&quot;")
+                            .replaceAll("'", "&#39;");
+                    }}
+
+                    function renderLeaderboard(game, rows) {{
+                        const list = leaderboardEls[game];
+                        if (!list) return;
+                        if (!rows || rows.length === 0) {{
+                            list.innerHTML = '<li class="leaderboard-empty">No scores yet. Be the first to score.</li>';
+                            return;
+                        }}
+                        list.innerHTML = rows
+                            .map(function (row) {{
+                                const displayName = row.name ? row.name + " (" + row.roll + ")" : row.roll;
+                                return (
+                                    '<li class="' +
+                                    leaderboardItemClass(Number(row.rank || 0)) +
+                                    '">' +
+                                    '<span class="leader-rank">#' + Number(row.rank || 0) + "</span>" +
+                                    '<span class="leader-name">' + escapeHtml(displayName) + "</span>" +
+                                    '<span class="leader-score">' + Number(row.score || 0) + "</span>" +
+                                    "</li>"
+                                );
+                            }})
+                            .join("");
+                    }}
+
+                    async function refreshLeaderboard(game) {{
+                        try {{
+                            const resp = await fetch(
+                                "/game_leaderboard?roll=" +
+                                    encodeURIComponent(studentRoll) +
+                                    "&token=" +
+                                    encodeURIComponent(studentToken) +
+                                    "&game=" +
+                                    encodeURIComponent(game),
+                                {{ cache: "no-store" }}
+                            );
+                            if (!resp.ok) return;
+                            const data = await resp.json();
+                            if (!data || !data.ok) return;
+                            renderLeaderboard(game, data.leaders || []);
+                        }} catch (error) {{}}
+                    }}
+
+                    async function pushScore(game, score) {{
+                        if (!Number.isFinite(score) || score < 1) return;
+                        try {{
+                            await fetch("/", {{
+                                method: "POST",
+                                headers: {{ "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }},
+                                body:
+                                    "action=submit_game_score" +
+                                    "&roll_no=" +
+                                    encodeURIComponent(studentRoll) +
+                                    "&auth_token=" +
+                                    encodeURIComponent(studentToken) +
+                                    "&game=" +
+                                    encodeURIComponent(game) +
+                                    "&score=" +
+                                    encodeURIComponent(String(score)),
+                            }});
+                        }} catch (error) {{}}
+                        refreshLeaderboard(game);
+                    }}
 
                     // Snake game
                     const snakeCanvas = document.getElementById("snake-canvas");
@@ -396,6 +496,7 @@ def student_games_page(name, roll, token):
                                 snakeHighScoreEl.textContent = String(snakeHighScore);
                                 localStorage.setItem(snakeHighScoreKey, String(snakeHighScore));
                             }}
+                            pushScore("snake", snakeScore);
                             snakePlaceFood();
                         }} else {{
                             snakeBody.pop();
@@ -506,6 +607,7 @@ def student_games_page(name, roll, token):
                                     flappyHighScoreEl.textContent = String(flappyHighScore);
                                     localStorage.setItem(flappyHighScoreKey, String(flappyHighScore));
                                 }}
+                                pushScore("flappy", flappyState.score);
                             }}
                         }});
 
@@ -574,6 +676,11 @@ def student_games_page(name, roll, token):
                     flappyReset();
                     snakeDraw();
                     flappyDraw();
+                    refreshLeaderboard("snake");
+                    refreshLeaderboard("flappy");
+                    setInterval(function () {{
+                        refreshLeaderboard(activeGame);
+                    }}, 15000);
                 }})();
             </script>
         </body>
@@ -604,7 +711,8 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
                         <input type="hidden" name="roll_no" value="{roll}">
                         <input type="hidden" name="auth_token" value="{token}">
                         <label><b>Select Files</b></label><br>
-                        <input type="file" name="lab_files" multiple required><br><br>
+                        <input id="student-lab-files" type="file" name="lab_files" multiple required>
+                        <div id="student-file-preview" class="file-preview-list file-preview-empty">No files selected yet.</div><br>
                         <label class="muted">
                             <input type="checkbox" name="confirm_submit" value="yes" required>
                             I confirm this is my final submission.
@@ -613,6 +721,27 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
                     </form>
                 </div>
             </div>
+            <script>
+                (function () {{
+                    const input = document.getElementById("student-lab-files");
+                    const preview = document.getElementById("student-file-preview");
+                    if (!input || !preview) return;
+                    input.addEventListener("change", function () {{
+                        const files = Array.from(input.files || []);
+                        if (files.length === 0) {{
+                            preview.classList.add("file-preview-empty");
+                            preview.innerHTML = "No files selected yet.";
+                            return;
+                        }}
+                        preview.classList.remove("file-preview-empty");
+                        preview.innerHTML = files
+                            .map(function (f, idx) {{
+                                return "<div>" + (idx + 1) + ". " + String(f.name) + "</div>";
+                            }})
+                            .join("");
+                    }});
+                }})();
+            </script>
         </body>
         """,
     )
@@ -633,7 +762,8 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
         f"""
         <div class="upload-type-item">
             <label class="small muted"><b>Paper Type {paper_type}</b></label>
-            <input type="file" name="question_paper_file_{paper_type}" multiple required>
+            <input id="qp-files-{paper_type.lower()}" type="file" name="question_paper_file_{paper_type}" multiple required data-preview-target="qp-preview-{paper_type.lower()}">
+            <div id="qp-preview-{paper_type.lower()}" class="file-preview-list file-preview-empty">No files selected yet.</div>
         </div>
         """
         for paper_type in paper_types
@@ -685,6 +815,31 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
                     </form>
                 </div>
             </main>
+            <script>
+                (function () {{
+                    const inputs = document.querySelectorAll(".upload-type-item input[type='file'][data-preview-target]");
+                    if (!inputs.length) return;
+                    inputs.forEach(function (input) {{
+                        const targetId = input.getAttribute("data-preview-target");
+                        const preview = document.getElementById(targetId);
+                        if (!preview) return;
+                        input.addEventListener("change", function () {{
+                            const files = Array.from(input.files || []);
+                            if (files.length === 0) {{
+                                preview.classList.add("file-preview-empty");
+                                preview.innerHTML = "No files selected yet.";
+                                return;
+                            }}
+                            preview.classList.remove("file-preview-empty");
+                            preview.innerHTML = files
+                                .map(function (f, idx) {{
+                                    return "<div>" + (idx + 1) + ". " + String(f.name) + "</div>";
+                                }})
+                                .join("");
+                        }});
+                    }});
+                }})();
+            </script>
         </body>
         """,
     )

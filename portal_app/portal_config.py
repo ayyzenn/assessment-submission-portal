@@ -5,6 +5,7 @@ UPLOAD_BASE_DIR = "submissions"
 LOG_FILE = "submission_logs.csv"
 IP_TRACK_FILE = "submission_ip_track.txt"
 QUESTION_PAPER_DIR = "question_paper"
+GAME_LEADERBOARD_FILE = "game_leaderboard.csv"
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"

@@ -1,6 +1,7 @@
 import cgi
 import http.server
 import io
+import json
 import mimetypes
 import os
 import socketserver
@@ -24,6 +25,7 @@ from .portal_data import (
     ensure_valid_paper_types,
     get_question_paper_file_path_for_type,
     has_student_submitted,
+    get_game_leaderboard,
     latest_question_paper_path,
     list_question_paper_files,
     load_data,
@@ -36,6 +38,7 @@ from .portal_data import (
     save_student_files,
     submitted_roll_for_ip,
     student_submission_files,
+    update_game_score,
 )
 from .portal_security import generate_password
 from .portal_sessions import SessionStore
@@ -133,6 +136,19 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
             return
 
+    def send_json(self, payload, status_code=200):
+        try:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return False
+
     def serve_static_css(self):
         base_dir = os.path.dirname(__file__)
         css_path = os.path.join(base_dir, "static", "style.css")
@@ -186,6 +202,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 self.show_question_materials(query)
             elif path == "/student_games":
                 self.show_student_games(query)
+            elif path == "/game_leaderboard":
+                self.show_game_leaderboard(query)
             elif path == "/question_paper_file":
                 self.serve_question_paper_file(query)
             elif path == "/admin_panel":
@@ -369,6 +387,22 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 record_submission_ip(client_ip, roll)
                 self.send_html(upload_success_page(roll, uploaded_files))
                 SESSIONS.end_student_session(roll)
+
+            elif action == "submit_game_score":
+                roll = str(form.getvalue("roll_no", "")).strip()
+                token = str(form.getvalue("auth_token", "")).strip()
+                game = str(form.getvalue("game", "")).strip().lower()
+                try:
+                    score = int(str(form.getvalue("score", "0")).strip() or "0")
+                except ValueError:
+                    self.send_json({"ok": False, "error": "Invalid score"}, status_code=400)
+                    return
+                if not self.is_student_authenticated(roll, token):
+                    self.send_json({"ok": False, "error": "Session expired"}, status_code=401)
+                    return
+                update_game_score(game=game, roll=roll, score=score)
+                self.send_json({"ok": True})
+                return
 
             elif action == "update_settings":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
@@ -746,6 +780,35 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             return
 
         self.send_html(student_games_page(str(user.iloc[0]["Student Name"]), roll, token))
+
+    def show_game_leaderboard(self, query):
+        roll = str(self.get_query_value(query, "roll", "")).strip()
+        token = str(self.get_query_value(query, "token", "")).strip()
+        game = str(self.get_query_value(query, "game", "")).strip().lower()
+        if not self.is_student_authenticated(roll, token):
+            self.send_json({"ok": False, "error": "Session expired"}, status_code=401)
+            return
+        if game not in {"snake", "flappy"}:
+            self.send_json({"ok": False, "error": "Invalid game"}, status_code=400)
+            return
+
+        rows = get_game_leaderboard(game=game, limit=20)
+        df = load_data()
+        name_map = {
+            str(row["Roll No."]).strip(): str(row.get("Student Name", "")).strip()
+            for _, row in df.iterrows()
+        }
+        leaderboard = []
+        for row in rows:
+            leaderboard.append(
+                {
+                    "rank": int(row["rank"]),
+                    "roll": str(row["roll"]),
+                    "name": name_map.get(str(row["roll"]), ""),
+                    "score": int(row["score"]),
+                }
+            )
+        self.send_json({"ok": True, "game": game, "leaders": leaderboard})
 
     def render_admin_navbar(self, admin_token):
         return admin_navbar(
