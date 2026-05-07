@@ -398,7 +398,7 @@ def update_game_score(game: str, roll: str, score: int) -> None:
     game_clean = str(game or "").strip().lower()
     roll_clean = str(roll or "").strip()
     score_value = int(score or 0)
-    if game_clean not in {"snake", "flappy"} or not roll_clean or score_value < 1:
+    if game_clean not in {"snake", "flappy", "pacman"} or not roll_clean or score_value < 1:
         return
 
     with _GAME_SCORE_LOCK:
@@ -432,7 +432,7 @@ def update_game_score(game: str, roll: str, score: int) -> None:
 
 def get_game_leaderboard(game: str, limit: int = 20) -> list[dict]:
     game_clean = str(game or "").strip().lower()
-    if game_clean not in {"snake", "flappy"}:
+    if game_clean not in {"snake", "flappy", "pacman"}:
         return []
     with _GAME_SCORE_LOCK:
         df = _load_game_scores()

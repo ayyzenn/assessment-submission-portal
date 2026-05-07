@@ -266,6 +266,7 @@ def student_games_page(name, roll, token):
                     <div class="game-tabs" role="tablist" aria-label="Game selector">
                         <button class="btn btn-purple game-tab-btn" id="tab-snake" data-game="snake" aria-selected="true">Snake</button>
                         <button class="btn btn-teal game-tab-btn" id="tab-flappy" data-game="flappy" aria-selected="false">Flappy Bird</button>
+                        <button class="btn btn-dark game-tab-btn" id="tab-pacman" data-game="pacman" aria-selected="false">Pacman</button>
                     </div>
 
                     <section class="game-panel" id="game-panel-snake">
@@ -319,6 +320,36 @@ def student_games_page(name, roll, token):
                             </div>
                         </div>
                     </section>
+
+                    <section class="game-panel" id="game-panel-pacman" hidden>
+                        <div class="game-layout">
+                            <div class="game-main">
+                                <h3 class="section-title">Pacman</h3>
+                                <p class="small muted">Controls: Arrow keys. Collect all dots. Avoid the ghost. Press <b>Space</b> to restart after game over.</p>
+                                <div class="game-scoreboard" aria-live="polite">
+                                    <div class="score-chip">
+                                        <span class="score-chip-label">Score</span>
+                                        <span class="score-chip-value" id="pacman-score">0</span>
+                                    </div>
+                                    <div class="score-chip score-chip-best">
+                                        <span class="score-chip-label">High Score</span>
+                                        <span class="score-chip-value" id="pacman-high-score">0</span>
+                                    </div>
+                                    <div class="score-chip">
+                                        <span class="score-chip-label">Level</span>
+                                        <span class="score-chip-value" id="pacman-level">1</span>
+                                    </div>
+                                </div>
+                                <canvas id="pacman-canvas" class="game-canvas" width="560" height="560"></canvas>
+                            </div>
+                            <div class="leaderboard-wrap">
+                                <h4 class="leaderboard-title">Pacman Leaderboard</h4>
+                                <ol id="pacman-leaderboard" class="leaderboard-list">
+                                    <li class="leaderboard-empty">No scores yet. Be the first to score.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </div>
 
@@ -330,10 +361,12 @@ def student_games_page(name, roll, token):
                     const panels = {{
                         snake: document.getElementById("game-panel-snake"),
                         flappy: document.getElementById("game-panel-flappy"),
+                        pacman: document.getElementById("game-panel-pacman"),
                     }};
                     const leaderboardEls = {{
                         snake: document.getElementById("snake-leaderboard"),
                         flappy: document.getElementById("flappy-leaderboard"),
+                        pacman: document.getElementById("pacman-leaderboard"),
                     }};
                     let activeGame = "snake";
 
@@ -341,6 +374,7 @@ def student_games_page(name, roll, token):
                         activeGame = name;
                         panels.snake.hidden = name !== "snake";
                         panels.flappy.hidden = name !== "flappy";
+                        panels.pacman.hidden = name !== "pacman";
                         tabButtons.forEach(function (btn) {{
                             const isActive = btn.getAttribute("data-game") === name;
                             btn.setAttribute("aria-selected", isActive ? "true" : "false");
@@ -649,6 +683,293 @@ def student_games_page(name, roll, token):
                         flappyDraw();
                     }}, 16);
 
+                    // Pacman game
+                    const pacmanCanvas = document.getElementById("pacman-canvas");
+                    const pacmanCtx = pacmanCanvas.getContext("2d");
+                    const pacmanScoreEl = document.getElementById("pacman-score");
+                    const pacmanHighScoreEl = document.getElementById("pacman-high-score");
+                    const pacmanLevelEl = document.getElementById("pacman-level");
+                    const pacmanHighScoreKey = "portal_game_pacman_high_score";
+                    let pacmanHighScore = Number(localStorage.getItem(pacmanHighScoreKey) || "0");
+                    pacmanHighScoreEl.textContent = String(pacmanHighScore);
+                    const pacmanGrid = 20;
+                    const pacmanTile = pacmanCanvas.width / pacmanGrid;
+                    let pacmanWalls = new Set();
+                    let pacmanDots = new Set();
+                    let pacmanPowerDots = new Set();
+                    let pacmanPlayer = {{ x: 1, y: 1 }};
+                    let pacmanGhost = {{ x: 18, y: 18 }};
+                    let pacmanDir = {{ x: 1, y: 0 }};
+                    let pacmanNextDir = {{ x: 1, y: 0 }};
+                    let pacmanGhostDir = {{ x: -1, y: 0 }};
+                    let pacmanScore = 0;
+                    let pacmanGameOver = false;
+                    let pacmanWon = false;
+                    let pacmanFrightenedTicks = 0;
+                    let pacmanLevel = 1;
+
+                    function pacmanKey(x, y) {{
+                        return String(x) + "," + String(y);
+                    }}
+
+                    function pacmanBuildMap() {{
+                        pacmanWalls = new Set();
+                        pacmanDots = new Set();
+                        pacmanPowerDots = new Set();
+                        const mazeVariant = Math.floor(Math.random() * 4);
+                        for (let y = 0; y < pacmanGrid; y += 1) {{
+                            for (let x = 0; x < pacmanGrid; x += 1) {{
+                                const border = x === 0 || y === 0 || x === pacmanGrid - 1 || y === pacmanGrid - 1;
+                                const pillarA = x === (4 + (mazeVariant % 2)) && y >= 2 && y <= 17 && y !== 9 && y !== 10;
+                                const pillarB = x === 10 && y >= 2 && y <= 17 && y !== (4 + (mazeVariant % 3)) && y !== (13 + (mazeVariant % 2));
+                                const pillarC = x === (14 + (mazeVariant === 3 ? -1 : 0)) && y >= 2 && y <= 17 && y !== 7 && y !== 12;
+                                const barTop = y === (6 + (mazeVariant === 2 ? 1 : 0)) && x >= 7 && x <= 12 && x !== (8 + mazeVariant % 3);
+                                const barBottom = y === (13 + (mazeVariant === 1 ? -1 : 0)) && x >= 7 && x <= 12 && x !== (10 + mazeVariant % 3);
+                                const zigA = mazeVariant >= 2 && (x + y) % 11 === 0 && x > 2 && x < 17 && y > 2 && y < 17;
+                                const safeZone = (x <= 2 && y <= 2) || (x >= pacmanGrid - 3 && y >= pacmanGrid - 3);
+                                if (border || ((pillarA || pillarB || pillarC || barTop || barBottom || zigA) && !safeZone)) {{
+                                    pacmanWalls.add(pacmanKey(x, y));
+                                }} else {{
+                                    pacmanDots.add(pacmanKey(x, y));
+                                }}
+                            }}
+                        }}
+                        pacmanDots.delete(pacmanKey(1, 1));
+                        pacmanDots.delete(pacmanKey(18, 18));
+                        [[1, 18], [18, 1], [3, 10], [16, 10]].forEach(function (p) {{
+                            const k = pacmanKey(p[0], p[1]);
+                            if (!pacmanWalls.has(k)) {{
+                                pacmanDots.delete(k);
+                                pacmanPowerDots.add(k);
+                            }}
+                        }});
+                        // Classic side tunnel.
+                        pacmanWalls.delete(pacmanKey(0, 10));
+                        pacmanWalls.delete(pacmanKey(19, 10));
+                    }}
+
+                    function pacmanReset() {{
+                        pacmanBuildMap();
+                        pacmanPlayer = {{ x: 1, y: 1 }};
+                        pacmanGhost = {{ x: 18, y: 18 }};
+                        pacmanDir = {{ x: 1, y: 0 }};
+                        pacmanNextDir = {{ x: 1, y: 0 }};
+                        pacmanGhostDir = {{ x: -1, y: 0 }};
+                        pacmanScore = 0;
+                        pacmanGameOver = false;
+                        pacmanWon = false;
+                        pacmanFrightenedTicks = 0;
+                        pacmanScoreEl.textContent = "0";
+                        pacmanLevel = 1;
+                        pacmanLevelEl.textContent = "1";
+                    }}
+
+                    function pacmanAdvanceLevel() {{
+                        pacmanLevel += 1;
+                        pacmanLevelEl.textContent = String(pacmanLevel);
+                        pacmanBuildMap();
+                        pacmanPlayer = {{ x: 1, y: 1 }};
+                        pacmanGhost = {{ x: 18, y: 18 }};
+                        pacmanDir = {{ x: 1, y: 0 }};
+                        pacmanNextDir = {{ x: 1, y: 0 }};
+                        pacmanGhostDir = {{ x: -1, y: 0 }};
+                        pacmanFrightenedTicks = 0;
+                    }}
+
+                    function pacmanTryMove(entity, dir) {{
+                        if (!dir || (dir.x === 0 && dir.y === 0)) return false;
+                        const nx = entity.x + dir.x;
+                        const ny = entity.y + dir.y;
+                        if (ny < 0 || ny >= pacmanGrid) return false;
+                        if (ny === 10 && nx < 0) {{
+                            entity.x = pacmanGrid - 1;
+                            return true;
+                        }}
+                        if (ny === 10 && nx >= pacmanGrid) {{
+                            entity.x = 0;
+                            return true;
+                        }}
+                        if (nx < 0 || nx >= pacmanGrid) return false;
+                        if (pacmanWalls.has(pacmanKey(nx, ny))) return false;
+                        entity.x = nx;
+                        entity.y = ny;
+                        return true;
+                    }}
+
+                    function pacmanStepGhost() {{
+                        const choices = [
+                            {{ x: 1, y: 0 }},
+                            {{ x: -1, y: 0 }},
+                            {{ x: 0, y: 1 }},
+                            {{ x: 0, y: -1 }},
+                        ];
+                        let valid = choices.filter(function (c) {{
+                            const nx = pacmanGhost.x + c.x;
+                            const ny = pacmanGhost.y + c.y;
+                            if (ny < 0 || ny >= pacmanGrid) return false;
+                            if (ny === 10 && (nx < 0 || nx >= pacmanGrid)) return true;
+                            if (nx < 0 || nx >= pacmanGrid) return false;
+                            return !pacmanWalls.has(pacmanKey(nx, ny));
+                        }});
+                        if (!valid.length) return;
+
+                        const reverse = {{ x: -pacmanGhostDir.x, y: -pacmanGhostDir.y }};
+                        const nonReverse = valid.filter(function (v) {{
+                            return !(v.x === reverse.x && v.y === reverse.y);
+                        }});
+                        if (nonReverse.length) valid = nonReverse;
+
+                        valid.sort(function (a, b) {{
+                            const da = Math.abs(pacmanGhost.x + a.x - pacmanPlayer.x) + Math.abs(pacmanGhost.y + a.y - pacmanPlayer.y);
+                            const db = Math.abs(pacmanGhost.x + b.x - pacmanPlayer.x) + Math.abs(pacmanGhost.y + b.y - pacmanPlayer.y);
+                            if (pacmanFrightenedTicks > 0) return db - da;
+                            return da - db;
+                        }});
+
+                        const best = valid[0];
+                        if (pacmanTryMove(pacmanGhost, best)) {{
+                            pacmanGhostDir = best;
+                        }}
+                    }}
+
+                    function pacmanUpdate() {{
+                        if (pacmanGameOver || pacmanWon) return;
+                        if (pacmanTryMove({{ x: pacmanPlayer.x, y: pacmanPlayer.y }}, pacmanNextDir)) {{
+                            pacmanDir = {{ x: pacmanNextDir.x, y: pacmanNextDir.y }};
+                        }}
+                        pacmanTryMove(pacmanPlayer, pacmanDir);
+
+                        const dotKey = pacmanKey(pacmanPlayer.x, pacmanPlayer.y);
+                        if (pacmanDots.has(dotKey)) {{
+                            pacmanDots.delete(dotKey);
+                            pacmanScore += 1;
+                            pacmanScoreEl.textContent = String(pacmanScore);
+                            if (pacmanScore > pacmanHighScore) {{
+                                pacmanHighScore = pacmanScore;
+                                pacmanHighScoreEl.textContent = String(pacmanHighScore);
+                                localStorage.setItem(pacmanHighScoreKey, String(pacmanHighScore));
+                            }}
+                            pushScore("pacman", pacmanScore);
+                        }}
+                        if (pacmanPowerDots.has(dotKey)) {{
+                            pacmanPowerDots.delete(dotKey);
+                            pacmanScore += 5;
+                            pacmanFrightenedTicks = 20;
+                            pacmanScoreEl.textContent = String(pacmanScore);
+                            if (pacmanScore > pacmanHighScore) {{
+                                pacmanHighScore = pacmanScore;
+                                pacmanHighScoreEl.textContent = String(pacmanHighScore);
+                                localStorage.setItem(pacmanHighScoreKey, String(pacmanHighScore));
+                            }}
+                            pushScore("pacman", pacmanScore);
+                        }}
+
+                        if (pacmanPlayer.x === pacmanGhost.x && pacmanPlayer.y === pacmanGhost.y) {{
+                            if (pacmanFrightenedTicks > 0) {{
+                                pacmanScore += 10;
+                                pacmanScoreEl.textContent = String(pacmanScore);
+                                pacmanGhost = {{ x: 18, y: 18 }};
+                                pacmanGhostDir = {{ x: -1, y: 0 }};
+                                pacmanFrightenedTicks = 0;
+                                pushScore("pacman", pacmanScore);
+                            }} else {{
+                                pacmanGameOver = true;
+                            }}
+                        }}
+                        if (pacmanDots.size === 0 && pacmanPowerDots.size === 0) {{
+                            pacmanAdvanceLevel();
+                        }}
+                        if (pacmanFrightenedTicks > 0) pacmanFrightenedTicks -= 1;
+                    }}
+
+                    function pacmanDraw() {{
+                        pacmanCtx.fillStyle = "#020617";
+                        pacmanCtx.fillRect(0, 0, pacmanCanvas.width, pacmanCanvas.height);
+
+                        pacmanCtx.fillStyle = "#334155";
+                        pacmanWalls.forEach(function (k) {{
+                            const parts = k.split(",");
+                            const x = Number(parts[0]);
+                            const y = Number(parts[1]);
+                            pacmanCtx.fillRect(x * pacmanTile, y * pacmanTile, pacmanTile, pacmanTile);
+                        }});
+
+                        pacmanCtx.fillStyle = "#f8fafc";
+                        pacmanDots.forEach(function (k) {{
+                            const parts = k.split(",");
+                            const x = Number(parts[0]);
+                            const y = Number(parts[1]);
+                            pacmanCtx.beginPath();
+                            pacmanCtx.arc(x * pacmanTile + pacmanTile / 2, y * pacmanTile + pacmanTile / 2, pacmanTile * 0.12, 0, Math.PI * 2);
+                            pacmanCtx.fill();
+                        }});
+                        pacmanCtx.fillStyle = "#a78bfa";
+                        pacmanPowerDots.forEach(function (k) {{
+                            const parts = k.split(",");
+                            const x = Number(parts[0]);
+                            const y = Number(parts[1]);
+                            pacmanCtx.beginPath();
+                            pacmanCtx.arc(x * pacmanTile + pacmanTile / 2, y * pacmanTile + pacmanTile / 2, pacmanTile * 0.21, 0, Math.PI * 2);
+                            pacmanCtx.fill();
+                        }});
+
+                        pacmanCtx.fillStyle = "#facc15";
+                        pacmanCtx.beginPath();
+                        pacmanCtx.arc(
+                            pacmanPlayer.x * pacmanTile + pacmanTile / 2,
+                            pacmanPlayer.y * pacmanTile + pacmanTile / 2,
+                            pacmanTile * 0.38,
+                            0.2 * Math.PI,
+                            1.8 * Math.PI
+                        );
+                        pacmanCtx.lineTo(pacmanPlayer.x * pacmanTile + pacmanTile / 2, pacmanPlayer.y * pacmanTile + pacmanTile / 2);
+                        pacmanCtx.fill();
+
+                        pacmanCtx.fillStyle = pacmanFrightenedTicks > 0 ? "#60a5fa" : "#ef4444";
+                        pacmanCtx.beginPath();
+                        pacmanCtx.arc(
+                            pacmanGhost.x * pacmanTile + pacmanTile / 2,
+                            pacmanGhost.y * pacmanTile + pacmanTile / 2,
+                            pacmanTile * 0.34,
+                            0,
+                            Math.PI * 2
+                        );
+                        pacmanCtx.fill();
+
+                        if (pacmanGameOver || pacmanWon) {{
+                            pacmanCtx.fillStyle = "rgba(0, 0, 0, 0.45)";
+                            pacmanCtx.fillRect(0, 0, pacmanCanvas.width, pacmanCanvas.height);
+                            pacmanCtx.fillStyle = "#ffffff";
+                            pacmanCtx.font = "bold 30px sans-serif";
+                            pacmanCtx.fillText(pacmanWon ? "You Win!" : "Game Over", 190, 260);
+                            pacmanCtx.font = "14px sans-serif";
+                            pacmanCtx.fillText("Press Space to restart", 200, 286);
+                        }}
+                    }}
+
+                    setInterval(function () {{
+                        pacmanUpdate();
+                        pacmanDraw();
+                    }}, 120);
+
+                    setInterval(function () {{
+                        if (pacmanGameOver || pacmanWon) return;
+                        pacmanStepGhost();
+                        if (pacmanPlayer.x === pacmanGhost.x && pacmanPlayer.y === pacmanGhost.y) {{
+                            if (pacmanFrightenedTicks > 0) {{
+                                pacmanScore += 10;
+                                pacmanScoreEl.textContent = String(pacmanScore);
+                                pacmanGhost = {{ x: 18, y: 18 }};
+                                pacmanGhostDir = {{ x: -1, y: 0 }};
+                                pacmanFrightenedTicks = 0;
+                                pushScore("pacman", pacmanScore);
+                            }} else {{
+                                pacmanGameOver = true;
+                            }}
+                        }}
+                        pacmanDraw();
+                    }}, 260);
+
                     document.addEventListener("keydown", function (event) {{
                         const key = event.key;
                         if (activeGame === "snake") {{
@@ -670,14 +991,28 @@ def student_games_page(name, roll, token):
                                 flappyState.birdVY = flappyState.flapLift;
                             }}
                         }}
+
+                        if (activeGame === "pacman") {{
+                            if (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight" || key === " ") {{
+                                event.preventDefault();
+                            }}
+                            if (key === "ArrowUp") pacmanNextDir = {{ x: 0, y: -1 }};
+                            if (key === "ArrowDown") pacmanNextDir = {{ x: 0, y: 1 }};
+                            if (key === "ArrowLeft") pacmanNextDir = {{ x: -1, y: 0 }};
+                            if (key === "ArrowRight") pacmanNextDir = {{ x: 1, y: 0 }};
+                            if (key === " " && (pacmanGameOver || pacmanWon)) pacmanReset();
+                        }}
                     }});
 
                     snakeReset();
                     flappyReset();
+                    pacmanReset();
                     snakeDraw();
                     flappyDraw();
+                    pacmanDraw();
                     refreshLeaderboard("snake");
                     refreshLeaderboard("flappy");
+                    refreshLeaderboard("pacman");
                     setInterval(function () {{
                         refreshLeaderboard(activeGame);
                     }}, 15000);

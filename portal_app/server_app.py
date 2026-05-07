@@ -788,7 +788,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         if not self.is_student_authenticated(roll, token):
             self.send_json({"ok": False, "error": "Session expired"}, status_code=401)
             return
-        if game not in {"snake", "flappy"}:
+        if game not in {"snake", "flappy", "pacman"}:
             self.send_json({"ok": False, "error": "Invalid game"}, status_code=400)
             return
 
