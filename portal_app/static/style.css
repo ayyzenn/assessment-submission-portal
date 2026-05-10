@@ -879,3 +879,307 @@ tbody tr:nth-child(even) {
     max-height: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   EXAM TIMER — student upload page
+   ═══════════════════════════════════════════════════════════════ */
+
+.exam-timer-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.3s ease;
+}
+
+.exam-timer-bar-hidden { display: none !important; }
+
+.exam-timer-icon    { font-size: 18px; line-height: 1; }
+.exam-timer-label   { flex: 1; }
+
+.exam-timer-display {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.exam-timer-before  { background: #1e293b; color: #94a3b8; }
+.exam-timer-active  { background: #064e3b; color: #a7f3d0; }
+.exam-timer-warn    { background: #78350f; color: #fde68a; }
+.exam-timer-crit    { background: #7f1d1d; color: #fecaca; animation: timer-pulse 1s ease-in-out infinite; }
+.exam-timer-ended   { background: #1c1917; color: #71717a; }
+
+@keyframes timer-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
+/* ── Warning banners ── */
+.exam-warn-banner {
+  padding: 12px 18px;
+  font-size: 14px;
+  border-bottom: 1px solid transparent;
+  text-align: center;
+}
+
+.exam-warn-banner-hidden { display: none !important; }
+
+.exam-warn-banner:not(.exam-warn-critical) {
+  background: #fef9c3;
+  border-color: #fde047;
+  color: #713f12;
+}
+
+.theme-dark .exam-warn-banner:not(.exam-warn-critical) {
+  background: #422006;
+  border-color: #ca8a04;
+  color: #fef08a;
+}
+
+.exam-warn-critical {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #7f1d1d;
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.theme-dark .exam-warn-critical {
+  background: #450a0a;
+  border-color: #dc2626;
+  color: #fecaca;
+}
+
+/* ── Submission locked overlay ── */
+.submission-locked-notice {
+  text-align: center;
+  padding: 32px 20px;
+  background: color-mix(in srgb, var(--card-bg) 90%, #ef4444 10%);
+  border: 1px solid #fca5a5;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.theme-dark .submission-locked-notice {
+  background: color-mix(in srgb, var(--card-bg) 88%, #7f1d1d 12%);
+  border-color: #7f1d1d;
+}
+
+.locked-icon  { font-size: 2.8rem; margin-bottom: 10px; }
+.locked-title { margin: 0 0 8px; color: #b91c1c; font-size: 1.15rem; }
+.locked-body  { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+
+.theme-dark .locked-title { color: #f87171; }
+
+/* ── Late request section ── */
+.late-request-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.late-request-status {
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.late-status-pending  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; }
+.late-status-approved { background: #f0fdf4; border: 1px solid #86efac; color: #14532d; }
+.late-status-rejected { background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d; }
+
+.theme-dark .late-status-pending  { background: #0f172a; border-color: #1d4ed8; color: #bfdbfe; }
+.theme-dark .late-status-approved { background: #052e16; border-color: #16a34a; color: #86efac; }
+.theme-dark .late-status-rejected { background: #450a0a; border-color: #dc2626; color: #fca5a5; }
+
+/* ═══════════════════════════════════════════════════════════════
+   STUDENT HOME — timer bar
+   ═══════════════════════════════════════════════════════════════ */
+
+.home-timer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.3s ease;
+}
+
+.home-timer-bar-hidden { display: none !important; }
+.home-timer-icon  { font-size: 16px; }
+.home-timer-text  { flex: 1; }
+
+.home-timer-before { background: #1e293b; color: #94a3b8; }
+.home-timer-active { background: #064e3b; color: #a7f3d0; }
+.home-timer-warn   { background: #78350f; color: #fde68a; }
+.home-timer-crit   { background: #7f1d1d; color: #fecaca; }
+.home-timer-ended  { background: #1c1917; color: #71717a; }
+
+/* ═══════════════════════════════════════════════════════════════
+   ADMIN PANEL — timer setup section
+   ═══════════════════════════════════════════════════════════════ */
+
+.timer-status-display {
+  margin-bottom: 12px;
+  min-height: 28px;
+}
+
+.timer-set-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timer-inputs-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.timer-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.timer-btn-row { margin-bottom: 0; }
+
+/* ── Timer status pills ── */
+.timer-pill {
+  display: inline-block;
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.timer-pill-notset { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.timer-pill-before { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+.timer-pill-active { background: #dcfce7; color: #14532d; border: 1px solid #86efac; }
+.timer-pill-ended  { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; }
+
+.theme-dark .timer-pill-notset { background: #1e293b; color: #94a3b8; border-color: #334155; }
+.theme-dark .timer-pill-before { background: #1e3a5e; color: #93c5fd; border-color: #1d4ed8; }
+.theme-dark .timer-pill-active { background: #052e16; color: #86efac; border-color: #16a34a; }
+.theme-dark .timer-pill-ended  { background: #450a0a; color: #fca5a5; border-color: #dc2626; }
+
+/* ═══════════════════════════════════════════════════════════════
+   ADMIN DASHBOARD — timer & late-request cards
+   ═══════════════════════════════════════════════════════════════ */
+
+.dash-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dash-timer-controls { margin-top: 8px; }
+
+.status-orange { color: #c2410c; font-weight: 700; }
+.theme-dark .status-orange { color: #fb923c; }
+
+.btn-xs {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+/* ── Inline password flash ── */
+@keyframes pw-flash {
+  0%   { background: color-mix(in srgb, var(--card-bg) 60%, #fef08a 40%); }
+  100% { background: transparent; }
+}
+
+.pw-flash { animation: pw-flash 1.6s ease-out forwards; }
+
+/* ── Dashboard folder link (clickable student name) ── */
+.dash-folder-link {
+  cursor: pointer;
+  color: var(--link-color, #2563eb);
+  text-decoration: underline dotted;
+  transition: color 0.15s ease;
+}
+
+.dash-folder-link:hover { color: #1d4ed8; text-decoration: underline; }
+.theme-dark .dash-folder-link { color: #60a5fa; }
+.theme-dark .dash-folder-link:hover { color: #93c5fd; }
+
+/* ── File size badge in upload preview ── */
+.file-size-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.theme-dark .file-size-badge { background: #334155; color: #94a3b8; }
+
+.file-size-empty {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.theme-dark .file-size-empty { background: #450a0a; color: #fca5a5; }
+
+.file-preview-empty-file {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.theme-dark .file-preview-empty-file { color: #f87171; }
+
+/* ── Student file preview rows ── */
+.file-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.file-preview-row:last-child { border-bottom: none; }
+
+.fp-num {
+  min-width: 20px;
+  font-weight: 700;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.fp-name {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  font-weight: 600;
+}
+
+.fp-ext {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #e0f2fe;
+  color: #0369a1;
+  flex-shrink: 0;
+}
+
+.theme-dark .fp-ext { background: #0c4a6e; color: #7dd3fc; }
+

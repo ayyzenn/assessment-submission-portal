@@ -5,7 +5,9 @@ import json
 import mimetypes
 import os
 import socketserver
+import subprocess
 import sys
+from datetime import datetime
 from urllib.parse import parse_qs, quote, urlparse
 
 import pandas as pd
@@ -16,7 +18,9 @@ from .portal_config import (
     ALLOWED_EXTENSIONS,
     AVAILABLE_EXTENSIONS,
     CONFIG,
+    LOGS_DIR,
     PORT,
+    UPLOAD_BASE_DIR,
 )
 from .portal_data import (
     PortalDataError,
@@ -57,10 +61,46 @@ from .portal_templates import (
     student_upload_page,
     upload_success_page,
 )
+from .portal_timer import (
+    add_late_request,
+    approve_late_request,
+    cleanup_stale_late_requests,
+    clear_late_request,
+    get_late_request_status,
+    get_late_requests,
+    get_student_timer_status,
+    get_timer_status,
+    is_submission_locked_for_student,
+    pause_timer,
+    reject_late_request,
+    reset_timer,
+    resume_timer,
+    set_exam_times,
+)
 
 SESSIONS = SessionStore()
 
 _ALLOWED_LOGIN_NOTICES = frozenset({"invalid", "session", "data", "assets"})
+
+
+def _open_folder(path: str) -> None:
+    """Open a folder in the OS file manager — cross-platform, generic."""
+    if sys.platform == "win32":
+        # Windows: os.startfile uses the registered handler (Explorer by default)
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        # Linux/BSD: try xdg-open first, then common GUI file managers
+        _FM_CANDIDATES = ["xdg-open", "thunar", "nautilus", "dolphin", "pcmanfm", "nemo", "caja"]
+        import shutil
+        for cmd in _FM_CANDIDATES:
+            if shutil.which(cmd):
+                subprocess.Popen([cmd, path])
+                return
+        raise RuntimeError(
+            "No file manager found. Install thunar, nautilus, dolphin, or pcmanfm."
+        )
 
 
 class SecureLabHandler(http.server.BaseHTTPRequestHandler):
@@ -194,6 +234,42 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 self.show_login_form(query)
             elif path == "/static/style.css":
                 self.serve_static_css()
+            # ── Public timer status ──────────────────────────────────────────
+            elif path == "/api/timer":
+                self.send_json(get_timer_status())
+            # ── Student-specific timer ───────────────────────────────────────
+            elif path == "/api/student_timer":
+                roll = str(self.get_query_value(query, "roll", "")).strip()
+                token = str(self.get_query_value(query, "token", "")).strip()
+                if not self.is_student_authenticated(roll, token):
+                    self.send_json({"ok": False, "error": "Session expired"}, status_code=401)
+                    return
+                status = get_student_timer_status(roll)
+                status["ok"] = True
+                self.send_json(status)
+            # ── Admin: dashboard JSON data (scroll-preserving refresh) ───────
+            elif path == "/admin_dashboard_data":
+                if not self.is_admin_authenticated(query):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                self.send_admin_dashboard_data()
+            # ── Admin: late requests list ────────────────────────────────────
+            elif path == "/api/late_requests":
+                if not self.is_admin_authenticated(query):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                requests = get_late_requests()
+                df = load_data()
+                name_map = {
+                    str(r["Roll No."]).strip(): str(r.get("Student Name", "")).strip()
+                    for _, r in df.iterrows()
+                }
+                for req in requests:
+                    if not req.get("name"):
+                        req["name"] = name_map.get(str(req.get("roll", "")), "")
+                    has_files = bool(student_submission_files(str(req.get("roll", ""))))
+                    req["submitted"] = has_files
+                self.send_json({"ok": True, "requests": requests})
             elif path == "/student":
                 self.show_student_home(query)
             elif path == "/student_submit":
@@ -221,6 +297,11 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     self.redirect_login_notice("session")
                     return
                 self.show_admin_dashboard(query)
+            elif path == "/admin_open_folder":
+                if not self.is_admin_authenticated(query):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                self.handle_open_submission_folder(query)
             elif path == "/export_credentials":
                 if not self.is_admin_authenticated(query):
                     self.redirect_login_notice("session")
@@ -243,6 +324,13 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._portal_post_close = True
         try:
+            path, query = self.parse_request_context()
+
+            # ── /api/* JSON endpoints ────────────────────────────────────────
+            if path.startswith("/api/"):
+                self.handle_api_post(path)
+                return
+
             form = cgi.FieldStorage(
                 fp=self.rfile,
                 headers=self.headers,
@@ -315,6 +403,18 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                         f"(Roll No. {existing_roll_for_ip}). Multiple students cannot submit from the same IP.",
                         "Back to Login",
                         "/",
+                    )
+                    return
+
+                # ── Timer lock check (server-side) ───────────────────────────
+                if is_submission_locked_for_student(roll):
+                    self.send_html(
+                        alert_retry_page(
+                            "Submission Time Ended",
+                            "The submission window has closed. No further uploads are accepted.",
+                            "Exam timer has expired. Contact your teacher if you need extra time.",
+                            self.student_url("/student_submit", roll, token),
+                        )
                     )
                     return
 
@@ -403,6 +503,36 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 update_game_score(game=game, roll=roll, score=score)
                 self.send_json({"ok": True})
                 return
+
+            elif action == "set_exam_timer":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.redirect_login_notice("session")
+                    return
+                start_str = str(form.getvalue("exam_start", "")).strip()
+                end_str = str(form.getvalue("exam_end", "")).strip()
+                if not start_str or not end_str:
+                    self.send_error(400, "Start and end times are required.")
+                    return
+                try:
+                    start_epoch = datetime.fromisoformat(start_str).timestamp()
+                    end_epoch = datetime.fromisoformat(end_str).timestamp()
+                except ValueError:
+                    self.send_error(400, "Invalid date/time format.")
+                    return
+                if end_epoch <= start_epoch:
+                    self.send_error(400, "End time must be after start time.")
+                    return
+                set_exam_times(start_epoch, end_epoch)
+                self.redirect(self.admin_url("/admin_panel", admin_token))
+
+            elif action == "reset_timer_full":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.redirect_login_notice("session")
+                    return
+                reset_timer()
+                self.redirect(self.admin_url("/admin_panel", admin_token))
 
             elif action == "update_settings":
                 admin_token = str(form.getvalue("admin_token", "")).strip()
@@ -533,6 +663,15 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 df.loc[mask, "Paper Type"] = selected_type
                 save_data(df)
                 self.redirect(self.admin_url("/admin_students", admin_token))
+            elif action == "update_instructions":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.redirect_login_notice("session")
+                    return
+                instructions = str(form.getvalue("instructions", "")).strip()
+                CONFIG["submission_instructions"] = instructions
+                self.redirect(self.admin_url("/admin_students", admin_token))
+
             else:
                 self.send_error(400, "Unsupported action")
         except PortalDataError:
@@ -543,6 +682,187 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             self.send_error_safe(500, "Unexpected server error")
         finally:
             self._portal_post_close = False
+
+    def handle_api_post(self, path: str) -> None:
+        """Handle all /api/* POST requests; always responds with JSON."""
+        try:
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={"REQUEST_METHOD": "POST"},
+            )
+
+            # ── Admin: pause / resume timer ──────────────────────────────────
+            if path == "/api/timer_control":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                action = str(form.getvalue("action", "")).strip()
+                if action == "pause":
+                    pause_timer()
+                elif action == "resume":
+                    resume_timer()
+                else:
+                    self.send_json({"ok": False, "error": "Unknown action"}, status_code=400)
+                    return
+                self.send_json({"ok": True, "timer": get_timer_status()})
+
+            # ── Admin: approve / reject late request ─────────────────────────
+            elif path == "/api/handle_late_request":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                roll = str(form.getvalue("roll", "")).strip()
+                decision = str(form.getvalue("decision", "")).strip().lower()
+                if not roll or decision not in ("approve", "reject"):
+                    self.send_json({"ok": False, "error": "Invalid parameters"}, status_code=400)
+                    return
+                if decision == "approve":
+                    ok = approve_late_request(roll)
+                else:
+                    ok = reject_late_request(roll)
+                self.send_json({"ok": ok})
+
+            # ── Admin: reset one student's password (async) ──────────────────
+            elif path == "/api/reset_password":
+                admin_token = str(form.getvalue("admin_token", "")).strip()
+                if not SESSIONS.is_admin_authenticated(admin_token):
+                    self.send_json({"ok": False, "error": "Unauthorized"}, status_code=401)
+                    return
+                target_roll = str(form.getvalue("target_roll", "")).strip()
+                if not target_roll:
+                    self.send_json({"ok": False, "error": "Roll number required"}, status_code=400)
+                    return
+                df = load_data()
+                mask = df["Roll No."].astype(str) == target_roll
+                if not mask.any():
+                    self.send_json({"ok": False, "error": "Student not found"}, status_code=404)
+                    return
+                new_pw = generate_password()
+                df.loc[mask, "Password"] = new_pw
+                save_data(df)
+                self.send_json({"ok": True, "new_password": new_pw, "roll": target_roll})
+
+            # ── Student: request extra time ──────────────────────────────────
+            elif path == "/api/request_extra_time":
+                roll = str(form.getvalue("roll_no", "")).strip()
+                token = str(form.getvalue("auth_token", "")).strip()
+                if not self.is_student_authenticated(roll, token):
+                    self.send_json({"ok": False, "error": "Session expired"}, status_code=401)
+                    return
+                df = load_data()
+                user = df[df["Roll No."].astype(str) == roll]
+                name = str(user.iloc[0]["Student Name"]) if not user.empty else roll
+                already = add_late_request(roll, name)
+                if not already:
+                    # Request already exists — return current status
+                    current_status = get_late_request_status(roll) or "pending"
+                    self.send_json({"ok": True, "already_requested": True, "status": current_status})
+                    return
+                self.send_json({"ok": True, "already_requested": False, "status": "pending"})
+
+            else:
+                self.send_json({"ok": False, "error": "Unknown API endpoint"}, status_code=404)
+
+        except PortalDataError:
+            self.send_json({"ok": False, "error": "Data error"}, status_code=500)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
+        except Exception:
+            self.send_json({"ok": False, "error": "Server error"}, status_code=500)
+
+    def send_admin_dashboard_data(self) -> None:
+        """Return JSON snapshot of dashboard: rows + stats + timer + late requests."""
+        try:
+            df = load_data()
+            logs = load_logs()
+            rows = []
+            submitted_count = 0
+            pending_count = 0
+            submitted_rolls: set = set()
+            for _, row in df.iterrows():
+                roll_str = str(row["Roll No."])
+                student_name = str(row.get("Student Name", ""))
+                user_logs = logs[logs["Roll No."].astype(str) == roll_str]
+                last_ip = (
+                    user_logs.iloc[-1]["IP Address"] if not user_logs.empty else "No Activity"
+                )
+                if "Timestamp" in user_logs.columns and not user_logs.empty:
+                    parsed_time = pd.to_datetime(user_logs.iloc[-1]["Timestamp"], errors="coerce")
+                    last_time = (
+                        parsed_time.strftime("%Y-%m-%d %I:%M:%S %p")
+                        if not pd.isna(parsed_time)
+                        else "No Upload"
+                    )
+                else:
+                    last_time = "No Upload"
+
+                has_files = bool(student_submission_files(roll_str))
+                if has_files:
+                    submitted_count += 1
+                    status_key = "submitted"
+                    submitted_rolls.add(roll_str)
+                else:
+                    pending_count += 1
+                    status_key = "pending"
+
+                rows.append({
+                    "name": student_name,
+                    "roll": roll_str,
+                    "ip": last_ip,
+                    "time": last_time,
+                    "status": status_key,
+                })
+
+            # Clean up stale late requests (no files + no active extra-time window)
+            cleanup_stale_late_requests(submitted_rolls)
+
+            # Enrich late requests with submission status and student names
+            name_map = {str(r["Roll No."]).strip(): str(r.get("Student Name", "")).strip()
+                        for _, r in df.iterrows()}
+            late_reqs = []
+            for req in get_late_requests():
+                entry = dict(req)
+                if not entry.get("name"):
+                    entry["name"] = name_map.get(str(entry.get("roll", "")), "")
+                entry["submitted"] = bool(student_submission_files(str(entry.get("roll", ""))))
+                late_reqs.append(entry)
+
+            self.send_json({
+                "ok": True,
+                "submitted_count": submitted_count,
+                "pending_count": pending_count,
+                "total_count": len(df),
+                "rows": rows,
+                "timer": get_timer_status(),
+                "late_requests": late_reqs,
+            })
+        except PortalDataError:
+            self.send_json({"ok": False, "error": "Data error"}, status_code=500)
+
+    def handle_open_submission_folder(self, query):
+        """Open a student's submission folder in the OS file manager (server-side)."""
+        roll = str(self.get_query_value(query, "roll", "")).strip()
+        if not roll:
+            self.send_json({"ok": False, "error": "Roll required"}, status_code=400)
+            return
+        # Prevent path traversal
+        safe_roll = os.path.basename(roll)
+        folder_path = os.path.realpath(os.path.join(UPLOAD_BASE_DIR, safe_roll))
+        base_path = os.path.realpath(UPLOAD_BASE_DIR)
+        if not folder_path.startswith(base_path + os.sep) and folder_path != base_path:
+            self.send_json({"ok": False, "error": "Invalid roll"}, status_code=400)
+            return
+        if not os.path.isdir(folder_path):
+            self.send_json({"ok": False, "error": "Folder not found"}, status_code=404)
+            return
+        try:
+            _open_folder(folder_path)
+            self.send_json({"ok": True, "path": folder_path})
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status_code=500)
 
     def export_credentials_excel(self):
         df = load_data().copy()
@@ -684,6 +1004,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 token=token,
                 max_files=CONFIG["max_files"],
                 allowed_ext_csv=", ".join(sorted(self.current_allowed_extensions())),
+                instructions=CONFIG.get("submission_instructions", ""),
             )
         )
 
@@ -721,6 +1042,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 view_qp_url=self.student_url("/question_paper", roll, token),
                 submit_url=self.student_url("/student_submit", roll, token),
                 games_url=self.student_url("/student_games", roll, token),
+                instructions=CONFIG.get("submission_instructions", ""),
             )
         )
 
@@ -875,8 +1197,9 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                     f"<option value='{paper_type}' {selected_attr}>{paper_type}</option>"
                 )
             rows += (
-                f"<tr><td>{idx + 1}</td><td>{roll_str}</td><td>{row['Student Name']}</td>"
-                f"<td>{student_password}</td>"
+                f"<tr data-roll='{roll_str}'>"
+                f"<td>{idx + 1}</td><td>{roll_str}</td><td>{row['Student Name']}</td>"
+                f"<td class='pw-cell'>{student_password}</td>"
                 f"<td><form method='POST' class='form-row'>"
                 f"<input type='hidden' name='action' value='set_student_paper_type'>"
                 f"<input type='hidden' name='admin_token' value='{admin_token}'>"
@@ -886,11 +1209,8 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 f"</form></td>"
                 f"<td>{status}</td><td>{last_ip}</td>"
                 f"<td class='submission-files-cell'>{files_html}</td>"
-                f"<td><form method='POST' class='inline-form'>"
-                f"<input type='hidden' name='action' value='reset_user'>"
-                f"<input type='hidden' name='admin_token' value='{admin_token}'>"
-                f"<input type='hidden' name='target_roll' value='{roll_str}'>"
-                f"<input type='submit' value='Reset' class='btn btn-dark'></form></td></tr>"
+                f"<td><button type='button' class='btn btn-dark reset-pw-btn' "
+                f"onclick=\"resetPasswordAsync('{roll_str}', this)\">Reset</button></td></tr>"
             )
         self.send_html(
             admin_students_page(
@@ -902,6 +1222,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 available_extensions=AVAILABLE_EXTENSIONS,
                 selected_extensions=sorted(self.current_allowed_extensions()),
                 paper_types=paper_types,
+                current_instructions=CONFIG.get("submission_instructions", ""),
             )
         )
 
@@ -912,6 +1233,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
         rows = ""
         submitted_count = 0
         pending_count = 0
+        submitted_rolls: set = set()
         for _, row in df.iterrows():
             roll_str = str(row["Roll No."])
             student_name = str(row.get("Student Name", ""))
@@ -933,23 +1255,35 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
                 status_key = "submitted"
                 status = "Submitted"
                 status_class = "status-green"
+                submitted_rolls.add(roll_str)
+                open_url = self.admin_url("/admin_open_folder", admin_token) + f"&roll={quote(roll_str)}"
+                name_cell = (
+                    f"<span class='dash-folder-link' "
+                    f"onclick=\"openSubmissionFolder('{roll_str}')\" "
+                    f"title='Click to open submission folder on server'>{student_name}</span>"
+                )
             else:
                 pending_count += 1
                 status_key = "pending"
                 status = "Pending"
                 status_class = "status-red"
+                name_cell = student_name
+
             rows += (
                 f'<tr class="dashboard-row" data-status="{status_key}">'
-                f"<td>{student_name}</td><td>{roll_str}</td><td>{last_ip}</td>"
+                f"<td>{name_cell}</td><td>{roll_str}</td><td>{last_ip}</td>"
                 f"<td>{last_time}</td><td><span class='{status_class}'>{status}</span></td></tr>"
             )
+
+        # Clean up late requests for students with no submission and expired extra time
+        cleanup_stale_late_requests(submitted_rolls)
 
         total_count = len(df)
         self.send_html(
             admin_dashboard_page(
                 navbar_html=self.render_admin_navbar(admin_token),
                 rows_html=rows,
-                refresh_seconds=5,
+                admin_token=admin_token,
                 submitted_count=submitted_count,
                 pending_count=pending_count,
                 total_count=total_count,

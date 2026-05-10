@@ -2,10 +2,11 @@ PORT = 8080
 
 EXCEL_FILE = "students.xlsx"
 UPLOAD_BASE_DIR = "submissions"
-LOG_FILE = "submission_logs.csv"
-IP_TRACK_FILE = "submission_ip_track.txt"
+LOGS_DIR = "logs"
+LOG_FILE = "logs/submission_logs.csv"
+IP_TRACK_FILE = "logs/submission_ip_track.txt"
 QUESTION_PAPER_DIR = "question_paper"
-GAME_LEADERBOARD_FILE = "game_leaderboard.csv"
+GAME_LEADERBOARD_FILE = "logs/game_leaderboard.csv"
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
@@ -35,4 +36,9 @@ CONFIG = {
     "max_files": 2,
     "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
     "question_paper_count": 1,
+    "submission_instructions": (
+        "Upload your completed lab files below. Ensure your roll number is correct, "
+        "your files are properly named, and you tick the confirmation checkbox before "
+        "submitting. Submissions cannot be changed after uploading."
+    ),
 }

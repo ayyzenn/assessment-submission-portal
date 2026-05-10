@@ -9,6 +9,7 @@ from .portal_config import (
     GAME_LEADERBOARD_FILE,
     IP_TRACK_FILE,
     LOG_FILE,
+    LOGS_DIR,
     QUESTION_PAPER_DIR,
     UPLOAD_BASE_DIR,
 )
@@ -28,6 +29,7 @@ _GAME_SCORE_LOCK = RLock()
 def ensure_directories() -> None:
     os.makedirs(UPLOAD_BASE_DIR, exist_ok=True)
     os.makedirs(QUESTION_PAPER_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
     if not os.path.exists(IP_TRACK_FILE):
         with open(IP_TRACK_FILE, "a", encoding="utf-8"):
             pass

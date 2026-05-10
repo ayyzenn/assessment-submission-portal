@@ -1,4 +1,5 @@
 import html
+import json
 
 
 def _page(title: str, body_html: str, auto_refresh_seconds: int | None = None) -> str:
@@ -215,7 +216,7 @@ def admin_navbar(admin_home_url, students_url, dashboard_url, export_url, logout
     """
 
 
-def student_home_page(name, roll, view_qp_url, submit_url, games_url):
+def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructions=""):
     return _page(
         "Student Portal",
         f"""
@@ -225,21 +226,75 @@ def student_home_page(name, roll, view_qp_url, submit_url, games_url):
                     <h2 class="title">Student Assessment Portal</h2>
                     <p class="muted text-on-dark no-margin">Welcome, {name} ({roll})</p>
                 </div>
+                <div id="home-timer-bar" class="home-timer-bar home-timer-bar-hidden">
+                    <span id="home-timer-icon" class="home-timer-icon">&#9201;</span>
+                    <span id="home-timer-text" class="home-timer-text">Loading timer...</span>
+                </div>
                 <div class="panel-body">
                     <div class="form-row justify-end">
                         <a class="btn-link btn-teal" href="{games_url}">Play Game</a>
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
-                    <p class="muted">
-                        Step 1: View question paper and attached materials.<br>
-                        Step 2: Prepare your solution and submit final files.
-                    </p>
+                    <div class="info-box" style="margin-bottom:12px;">
+                        {html.escape(instructions) if instructions else "Step 1: View question paper and attached materials.<br>Step 2: Prepare your solution and submit final files."}
+                    </div>
                     <div class="form-row">
                         <a class="btn-link btn-purple" href="{view_qp_url}">View Materials</a>
                         <a class="btn-link btn-primary" href="{submit_url}">Submit Solution</a>
                     </div>
                 </div>
             </div>
+            <script>
+                (function () {{
+                    const roll = {json.dumps(roll)};
+                    const token = {json.dumps("")};
+                    // token not available on home page - use public timer
+                    const bar = document.getElementById("home-timer-bar");
+                    const text = document.getElementById("home-timer-text");
+                    const icon = document.getElementById("home-timer-icon");
+
+                    function fmt(s) {{
+                        if (s === null || s === undefined) return "--:--";
+                        const h = Math.floor(s / 3600);
+                        const m = Math.floor((s % 3600) / 60);
+                        const sc = s % 60;
+                        if (h > 0) return h + ":" + String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                        return String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                    }}
+
+                    async function pollTimer() {{
+                        try {{
+                            const resp = await fetch("/api/timer", {{cache: "no-store"}});
+                            if (!resp.ok) return;
+                            const d = await resp.json();
+                            bar.classList.remove("home-timer-bar-hidden","home-timer-active","home-timer-warn","home-timer-crit","home-timer-ended","home-timer-before");
+                            if (d.phase === "not_set") {{ bar.classList.add("home-timer-bar-hidden"); return; }}
+                            bar.classList.remove("home-timer-bar-hidden");
+                            if (d.phase === "before_exam") {{
+                                bar.classList.add("home-timer-before");
+                                text.textContent = "Exam starts in " + fmt(d.seconds_until_start) + (d.is_paused ? " (paused)" : "");
+                                icon.textContent = "⏳";
+                            }} else if (d.phase === "active") {{
+                                const rem = d.seconds_remaining;
+                                if (rem <= 300) {{ bar.classList.add("home-timer-crit"); icon.textContent = "🔴"; }}
+                                else if (rem <= 600) {{ bar.classList.add("home-timer-warn"); icon.textContent = "⚠️"; }}
+                                else {{ bar.classList.add("home-timer-active"); icon.textContent = "⏱️"; }}
+                                text.textContent = (d.is_paused ? "PAUSED — " : "") + "Time remaining: " + fmt(rem);
+                            }} else if (d.phase === "extra_time") {{
+                                bar.classList.add("home-timer-crit");
+                                text.textContent = "Extra time: " + fmt(d.seconds_remaining);
+                                icon.textContent = "⏰";
+                            }} else {{
+                                bar.classList.add("home-timer-ended");
+                                text.textContent = "Submission time has ended.";
+                                icon.textContent = "🔒";
+                            }}
+                        }} catch (e) {{}}
+                    }}
+                    pollTimer();
+                    setInterval(pollTimer, 3000);
+                }})();
+            </script>
         </body>
         """,
     )
@@ -1023,11 +1078,31 @@ def student_games_page(name, roll, token):
     )
 
 
-def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
+def student_upload_page(roll, name, token, max_files, allowed_ext_csv, instructions=""):
     return _page(
         "Student Submission Portal",
         f"""
         <body class="bg-soft">
+            <!-- ── Sticky exam timer bar ── -->
+            <div id="exam-timer-bar" class="exam-timer-sticky exam-timer-bar-hidden">
+                <span id="exam-timer-icon" class="exam-timer-icon">&#9201;</span>
+                <span id="exam-timer-text" class="exam-timer-label">Loading timer…</span>
+                <span id="exam-timer-display" class="exam-timer-display"></span>
+            </div>
+
+            <!-- ── 10-minute warning banner ── -->
+            <div id="warn-10" class="exam-warn-banner exam-warn-banner-hidden" role="alert">
+                <b>&#9888; Only 10 minutes remaining.</b>
+                Please organise your files, verify your roll number, and review submission
+                instructions carefully before final submission.
+            </div>
+
+            <!-- ── 5-minute critical alert ── -->
+            <div id="warn-5" class="exam-warn-banner exam-warn-critical exam-warn-banner-hidden" role="alert">
+                <b>&#128721; Only 5 minutes remaining.</b>
+                Submission portal will close soon. Submit immediately.
+            </div>
+
             <div class="container-student">
                 <div class="panel-head">
                     <h2 class="title">Submission Portal</h2>
@@ -1039,42 +1114,324 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv):
                         <a class="btn-link btn-danger" href="/">Logout</a>
                     </div>
                     <div class="info-box info-box-blue">
-                        <b>Instructions:</b> You can upload up to {max_files} file(s). Allowed types: {allowed_ext_csv}.
+                        You can upload up to {max_files} file(s). <br> <b>Allowed types:</b> {allowed_ext_csv}.
                     </div>
-                    <form method="POST" enctype="multipart/form-data" onsubmit="return confirm('Are you sure you want to submit? You will not be able to upload again.');">
+
+                    <!-- ── Submission ended overlay ── -->
+                    <div id="submission-locked-notice" class="submission-locked-notice" style="display:none;">
+                        <div class="locked-icon">&#128274;</div>
+                        <h3 class="locked-title">Submission Time Has Ended</h3>
+                        <p class="locked-body" id="locked-body-text">
+                            The submission window is closed. Contact your teacher if you need extra time.
+                        </p>
+                        <div id="late-request-section" class="late-request-section">
+                            <button id="late-request-btn" class="btn btn-primary" onclick="doRequestExtraTime()">
+                                Request Extra Time from Teacher
+                            </button>
+                            <div id="late-request-status" class="late-request-status" style="display:none;"></div>
+                        </div>
+                    </div>
+
+                    <form id="upload-form" method="POST" enctype="multipart/form-data"
+                          onsubmit="return validateUpload();">
                         <input type="hidden" name="action" value="upload">
                         <input type="hidden" name="roll_no" value="{roll}">
                         <input type="hidden" name="auth_token" value="{token}">
                         <label><b>Select Files</b></label><br>
-                        <input id="student-lab-files" type="file" name="lab_files" multiple required>
-                        <div id="student-file-preview" class="file-preview-list file-preview-empty">No files selected yet.</div><br>
+                        <input id="student-lab-files" type="file" name="lab_files" multiple required
+                               data-preview-target="student-file-preview">
+                        <div id="student-file-preview" class="file-preview-list file-preview-empty">No files selected yet.</div>
+                        <div id="empty-file-warn" class="exam-warn-banner" style="display:none;margin-top:6px;">
+                            <b>&#9888; One or more selected files are empty (0 bytes).</b>
+                            Remove them before submitting — empty files will not be accepted.
+                        </div><br>
                         <label class="muted">
                             <input type="checkbox" name="confirm_submit" value="yes" required>
                             I confirm this is my final submission.
                         </label><br><br>
-                        <input class="btn btn-primary" type="submit" value="Submit Final Files">
+                        <input id="submit-btn" class="btn btn-primary" type="submit" value="Submit Final Files">
                     </form>
                 </div>
             </div>
+
+            <!-- ── Standalone file-preview script (no timer dependencies) ── -->
             <script>
                 (function () {{
-                    const input = document.getElementById("student-lab-files");
-                    const preview = document.getElementById("student-file-preview");
-                    if (!input || !preview) return;
-                    input.addEventListener("change", function () {{
-                        const files = Array.from(input.files || []);
+                    var fileInput = document.getElementById("student-lab-files");
+                    var preview   = document.getElementById("student-file-preview");
+                    var emptyWarn = document.getElementById("empty-file-warn");
+                    if (!fileInput || !preview) return;
+
+                    function fmtSize(bytes) {{
+                        if (bytes === 0) return "⚠️ EMPTY";
+                        if (bytes < 1024) return bytes + " B";
+                        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+                        return (bytes / 1048576).toFixed(2) + " MB";
+                    }}
+
+                    function getExt(name) {{
+                        var dot = name.lastIndexOf(".");
+                        return dot > 0 ? name.substring(dot) : "(no ext)";
+                    }}
+
+                    function updatePreview() {{
+                        var files = Array.from(fileInput.files || []);
                         if (files.length === 0) {{
                             preview.classList.add("file-preview-empty");
                             preview.innerHTML = "No files selected yet.";
+                            if (emptyWarn) emptyWarn.style.display = "none";
+                            var sb = document.getElementById("submit-btn");
+                            if (sb) sb.disabled = false;
                             return;
                         }}
+                        var hasEmpty = false;
                         preview.classList.remove("file-preview-empty");
-                        preview.innerHTML = files
-                            .map(function (f, idx) {{
-                                return "<div>" + (idx + 1) + ". " + String(f.name) + "</div>";
-                            }})
-                            .join("");
-                    }});
+                        preview.innerHTML = files.map(function (f, idx) {{
+                            var empty = (f.size === 0);
+                            if (empty) hasEmpty = true;
+                            var ext   = getExt(f.name);
+                            var size  = fmtSize(f.size);
+                            var rowCls = empty ? "file-preview-empty-file" : "";
+                            return "<div class='file-preview-row " + rowCls + "'>" +
+                                "<span class='fp-num'>" + (idx + 1) + ".</span>" +
+                                "<span class='fp-name'>" + String(f.name) + "</span>" +
+                                "<span class='fp-ext'>" + ext + "</span>" +
+                                "<span class='file-size-badge" + (empty ? " file-size-empty" : "") + "'>" + size + "</span>" +
+                                "</div>";
+                        }}).join("");
+                        if (emptyWarn) emptyWarn.style.display = hasEmpty ? "" : "none";
+                        var sb = document.getElementById("submit-btn");
+                        if (sb) sb.disabled = hasEmpty;
+                    }}
+
+                    fileInput.addEventListener("change", updatePreview);
+                }})();
+            </script>
+
+            <script>
+                (function () {{
+                    const _roll = {json.dumps(roll)};
+                    const _token = {json.dumps(token)};
+                    let _warned10 = false;
+                    let _warned5 = false;
+                    let _locked = false;
+                    let _lateStatus = null; // null | "pending" | "approved" | "rejected"
+
+                    const timerBar = document.getElementById("exam-timer-bar");
+                    const timerIcon = document.getElementById("exam-timer-icon");
+                    const timerLabel = document.getElementById("exam-timer-text");
+                    const timerDisplay = document.getElementById("exam-timer-display");
+                    const warn10 = document.getElementById("warn-10");
+                    const warn5 = document.getElementById("warn-5");
+                    const lockNotice = document.getElementById("submission-locked-notice");
+                    const uploadForm = document.getElementById("upload-form");
+                    const submitBtn = document.getElementById("submit-btn");
+                    const lockedBody = document.getElementById("locked-body-text");
+                    const lateSection = document.getElementById("late-request-section");
+                    const lateBtn = document.getElementById("late-request-btn");
+                    const lateStatusDiv = document.getElementById("late-request-status");
+
+                    // ── Pre-submit validation ─────────────────────────────────
+                    window.validateUpload = function() {{
+                        const fileInput = document.getElementById("student-lab-files");
+                        const files = Array.from((fileInput && fileInput.files) || []);
+                        const emptyFiles = files.filter(function(f) {{ return f.size === 0; }});
+                        if (emptyFiles.length > 0) {{
+                            alert("Cannot submit: " + emptyFiles.length + " empty file(s) selected.\n" +
+                                  "Remove empty files before submitting.");
+                            return false;
+                        }}
+                        return confirm("Are you sure you want to submit? You will not be able to upload again.");
+                    }};
+
+                    function fmt(s) {{
+                        if (s === null || s === undefined) return "";
+                        const h = Math.floor(s / 3600);
+                        const m = Math.floor((s % 3600) / 60);
+                        const sc = s % 60;
+                        if (h > 0) return h + ":" + String(m).padStart(2, "0") + ":" + String(sc).padStart(2, "0");
+                        return String(m).padStart(2, "0") + ":" + String(sc).padStart(2, "0");
+                    }}
+
+                    function beep() {{
+                        try {{
+                            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                            const osc = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.frequency.value = 880;
+                            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.6);
+                        }} catch (e) {{}}
+                    }}
+
+                    function lockForm(message) {{
+                        if (_locked) return;
+                        _locked = true;
+                        if (uploadForm) {{
+                            uploadForm.querySelectorAll("input,select,textarea,button").forEach(function (el) {{
+                                el.disabled = true;
+                            }});
+                        }}
+                        if (lockNotice) lockNotice.style.display = "";
+                        if (lockedBody && message) lockedBody.textContent = message;
+                    }}
+
+                    function unlockForm() {{
+                        if (!_locked) return;
+                        _locked = false;
+                        if (uploadForm) {{
+                            uploadForm.querySelectorAll("input,select,textarea,button").forEach(function (el) {{
+                                el.disabled = false;
+                            }});
+                        }}
+                        if (lockNotice) lockNotice.style.display = "none";
+                    }}
+
+                    function setTimerBar(cls, iconText, labelText, displayText) {{
+                        timerBar.className = "exam-timer-sticky " + cls;
+                        if (timerIcon) timerIcon.textContent = iconText;
+                        if (timerLabel) timerLabel.textContent = labelText;
+                        if (timerDisplay) timerDisplay.textContent = displayText || "";
+                    }}
+
+                    function showLateRequestSection(status) {{
+                        _lateStatus = status;
+                        if (!lateSection) return;
+                        if (status === "pending") {{
+                            if (lateBtn) lateBtn.style.display = "none";
+                            if (lateStatusDiv) {{
+                                lateStatusDiv.style.display = "";
+                                lateStatusDiv.className = "late-request-status late-status-pending";
+                                lateStatusDiv.textContent = "⌛ Request submitted. Waiting for teacher approval…";
+                            }}
+                        }} else if (status === "approved") {{
+                            if (lateBtn) lateBtn.style.display = "none";
+                            if (lateStatusDiv) {{
+                                lateStatusDiv.style.display = "";
+                                lateStatusDiv.className = "late-request-status late-status-approved";
+                                lateStatusDiv.textContent = "Extra time approved! Please submit now.";
+                            }}
+                        }} else if (status === "rejected") {{
+                            if (lateBtn) lateBtn.style.display = "none";
+                            if (lateStatusDiv) {{
+                                lateStatusDiv.style.display = "";
+                                lateStatusDiv.className = "late-request-status late-status-rejected";
+                                lateStatusDiv.textContent = "Extra time request was rejected by teacher.";
+                            }}
+                        }} else {{
+                            if (lateBtn) lateBtn.style.display = "";
+                            if (lateStatusDiv) lateStatusDiv.style.display = "none";
+                        }}
+                    }}
+
+                    function updateTimerUI(d) {{
+                        const phase = d.phase;
+                        const rem = d.seconds_remaining;
+                        const paused = d.is_paused;
+
+                        if (phase === "not_set") {{
+                            timerBar.className = "exam-timer-sticky exam-timer-bar-hidden";
+                            return;
+                        }}
+
+                        if (phase === "before_exam") {{
+                            setTimerBar("exam-timer-before", "⏳", "Exam starts in:", fmt(d.seconds_until_start) + (paused ? " (paused)" : ""));
+                            if (warn10) warn10.classList.add("exam-warn-banner-hidden");
+                            if (warn5) warn5.classList.add("exam-warn-banner-hidden");
+                            return;
+                        }}
+
+                        if (phase === "extra_time") {{
+                            setTimerBar("exam-timer-crit", "⏰", "Extra submission time:", fmt(rem));
+                            unlockForm();
+                            if (lockNotice) lockNotice.style.display = "none";
+                            showLateRequestSection("approved");
+                            return;
+                        }}
+
+                        if (phase === "ended") {{
+                            setTimerBar("exam-timer-ended", "🔒", "Submission closed", "");
+                            lockForm("The submission window has closed. You may request extra time below.");
+                            // Check for pending late request via current status
+                            if (lateSection && _lateStatus === null) {{
+                                showLateRequestSection(null);
+                            }}
+                            return;
+                        }}
+
+                        // phase === "active"
+                        if (rem !== null && rem <= 300 && !_warned5) {{
+                            _warned5 = true;
+                            if (warn5) warn5.classList.remove("exam-warn-banner-hidden");
+                            beep();
+                        }}
+                        if (rem !== null && rem <= 600 && !_warned10) {{
+                            _warned10 = true;
+                            if (warn10) warn10.classList.remove("exam-warn-banner-hidden");
+                        }}
+                        if (warn5) {{
+                            if (rem !== null && rem <= 300) warn5.classList.remove("exam-warn-banner-hidden");
+                        }}
+                        if (warn10) {{
+                            if (rem !== null && rem <= 600 && rem > 300) warn10.classList.remove("exam-warn-banner-hidden");
+                            else if (rem !== null && rem <= 300) warn10.classList.add("exam-warn-banner-hidden");
+                        }}
+
+                        if (rem !== null && rem <= 300) {{
+                            setTimerBar("exam-timer-crit", "🔴", "Time remaining:", fmt(rem) + (paused ? " ⏸" : ""));
+                        }} else if (rem !== null && rem <= 600) {{
+                            setTimerBar("exam-timer-warn", "⚠️", "Time remaining:", fmt(rem) + (paused ? " ⏸" : ""));
+                        }} else {{
+                            setTimerBar("exam-timer-active", "⏱️", "Time remaining:", fmt(rem) + (paused ? " ⏸" : ""));
+                        }}
+
+                        if (_locked && _lateStatus !== "approved") {{
+                            unlockForm();
+                        }}
+                    }}
+
+                    async function pollTimer() {{
+                        try {{
+                            const url = "/api/student_timer?roll=" + encodeURIComponent(_roll) + "&token=" + encodeURIComponent(_token);
+                            const resp = await fetch(url, {{cache: "no-store"}});
+                            if (!resp.ok) return;
+                            const d = await resp.json();
+                            updateTimerUI(d);
+
+                            // Sync late request status from timer
+                            if (d.phase === "ended" && _lateStatus === null) {{
+                                // Check if there's already a pending request
+                            }} else if (d.phase === "extra_time" && _lateStatus !== "approved") {{
+                                showLateRequestSection("approved");
+                            }}
+                        }} catch (e) {{}}
+                    }}
+
+                    window.doRequestExtraTime = async function () {{
+                        if (lateBtn) lateBtn.disabled = true;
+                        try {{
+                            const resp = await fetch("/api/request_extra_time", {{
+                                method: "POST",
+                                headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                                body: "roll_no=" + encodeURIComponent(_roll) + "&auth_token=" + encodeURIComponent(_token),
+                            }});
+                            const data = await resp.json();
+                            if (data.ok) {{
+                                showLateRequestSection(data.status || "pending");
+                            }} else {{
+                                if (lateBtn) lateBtn.disabled = false;
+                            }}
+                        }} catch (e) {{
+                            if (lateBtn) lateBtn.disabled = false;
+                        }}
+                    }};
+
+                    pollTimer();
+                    setInterval(pollTimer, 2000);
                 }})();
             </script>
         </body>
@@ -1112,7 +1469,40 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
             <main class="container-sm">
                 <div class="card admin-hero-card">
                     <h2 class="title">Admin Home</h2>
-                    <p class="muted">Use this page for paper setup and question material upload. Other controls are available in the navbar.</p>
+                    <p class="muted">Use this page for paper setup, question material upload, and exam timer configuration.</p>
+                </div>
+
+                <!-- ── Exam Timer Setup ── -->
+                <div class="card admin-section-card">
+                    <h3 class="section-title">&#9201; Exam Timer</h3>
+                    <p class="small muted">Set start and end times to control the student submission window.
+                       The timer syncs in real-time across all connected students.</p>
+                    <div id="current-timer-status" class="timer-status-display">
+                        <span class="small muted">Loading timer status…</span>
+                    </div>
+                    <form method="POST" class="timer-set-form">
+                        <input type="hidden" name="action" value="set_exam_timer">
+                        <input type="hidden" name="admin_token" value="{admin_token}">
+                        <div class="timer-inputs-row">
+                            <div class="timer-input-group">
+                                <label class="small muted"><b>Exam Start</b></label>
+                                <input type="datetime-local" name="exam_start" id="exam-start-input" required>
+                            </div>
+                            <div class="timer-input-group">
+                                <label class="small muted"><b>Exam End</b></label>
+                                <input type="datetime-local" name="exam_end" id="exam-end-input" required>
+                            </div>
+                        </div>
+                        <div class="form-row timer-btn-row">
+                            <input class="btn btn-primary" type="submit" value="Set Timer">
+                            <button type="button" class="btn btn-secondary" id="timer-pause-btn" onclick="togglePause()">Pause</button>
+                            <button type="button" class="btn btn-red" onclick="doResetTimer()">Reset Timer</button>
+                        </div>
+                    </form>
+                    <form id="reset-timer-form" method="POST" style="display:none;">
+                        <input type="hidden" name="action" value="reset_timer_full">
+                        <input type="hidden" name="admin_token" value="{admin_token}">
+                    </form>
                 </div>
 
                 <div class="card admin-section-card">
@@ -1152,8 +1542,8 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
             </main>
             <script>
                 (function () {{
+                    // ── File previews ──────────────────────────────────────────
                     const inputs = document.querySelectorAll(".upload-type-item input[type='file'][data-preview-target]");
-                    if (!inputs.length) return;
                     inputs.forEach(function (input) {{
                         const targetId = input.getAttribute("data-preview-target");
                         const preview = document.getElementById(targetId);
@@ -1166,13 +1556,82 @@ def admin_home_page_multi(navbar_html, students_url, admin_token, paper_types, p
                                 return;
                             }}
                             preview.classList.remove("file-preview-empty");
-                            preview.innerHTML = files
-                                .map(function (f, idx) {{
-                                    return "<div>" + (idx + 1) + ". " + String(f.name) + "</div>";
-                                }})
-                                .join("");
+                            preview.innerHTML = files.map(function (f, idx) {{
+                                return "<div>" + (idx + 1) + ". " + String(f.name) + "</div>";
+                            }}).join("");
                         }});
                     }});
+
+                    // ── Timer status display ──────────────────────────────────
+                    const adminToken = {json.dumps(admin_token)};
+                    const pauseBtn = document.getElementById("timer-pause-btn");
+                    const statusDiv = document.getElementById("current-timer-status");
+                    const startInput = document.getElementById("exam-start-input");
+                    const endInput = document.getElementById("exam-end-input");
+
+                    function fmt(s) {{
+                        if (s === null || s === undefined) return "--:--";
+                        const h = Math.floor(s / 3600);
+                        const m = Math.floor((s % 3600) / 60);
+                        const sc = s % 60;
+                        if (h > 0) return h + ":" + String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                        return String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                    }}
+
+                    function epochToLocal(epoch) {{
+                        if (!epoch) return "";
+                        const d = new Date(epoch * 1000);
+                        const pad = n => String(n).padStart(2,"0");
+                        return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) +
+                               "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+                    }}
+
+                    async function fetchTimerAndUpdate() {{
+                        try {{
+                            const resp = await fetch("/api/timer", {{cache: "no-store"}});
+                            if (!resp.ok) return;
+                            const d = await resp.json();
+                            // Update pause button label
+                            if (pauseBtn) pauseBtn.textContent = d.is_paused ? "Resume" : "Pause";
+                            // Populate date inputs if not currently focused
+                            if (startInput && !document.activeElement === startInput && d.start_time) {{
+                                startInput.value = epochToLocal(d.start_time);
+                            }}
+                            if (endInput && !document.activeElement === endInput && d.end_time) {{
+                                endInput.value = epochToLocal(d.end_time);
+                            }}
+                            // Update status pill
+                            let cls = "timer-pill-notset";
+                            let label = "No timer set";
+                            if (d.phase === "before_exam") {{ cls = "timer-pill-before"; label = "Starts in " + fmt(d.seconds_until_start) + (d.is_paused ? " ⏸" : ""); }}
+                            else if (d.phase === "active") {{ cls = "timer-pill-active"; label = "Active — " + fmt(d.seconds_remaining) + " remaining" + (d.is_paused ? " ⏸ PAUSED" : ""); }}
+                            else if (d.phase === "extra_time") {{ cls = "timer-pill-active"; label = "Extra time — " + fmt(d.seconds_remaining); }}
+                            else if (d.phase === "ended") {{ cls = "timer-pill-ended"; label = "Exam ended"; }}
+                            if (statusDiv) statusDiv.innerHTML = "<span class='timer-pill " + cls + "'>" + label + "</span>";
+                        }} catch (e) {{}}
+                    }}
+
+                    window.togglePause = async function () {{
+                        try {{
+                            const resp = await fetch("/api/timer", {{cache: "no-store"}});
+                            const current = await resp.json();
+                            const action = current.is_paused ? "resume" : "pause";
+                            await fetch("/api/timer_control", {{
+                                method: "POST",
+                                headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                                body: "admin_token=" + encodeURIComponent(adminToken) + "&action=" + action,
+                            }});
+                            fetchTimerAndUpdate();
+                        }} catch (e) {{}}
+                    }};
+
+                    window.doResetTimer = function () {{
+                        if (!confirm("Reset the exam timer? Students will no longer see a countdown.")) return;
+                        document.getElementById("reset-timer-form").submit();
+                    }};
+
+                    fetchTimerAndUpdate();
+                    setInterval(fetchTimerAndUpdate, 4000);
                 }})();
             </script>
         </body>
@@ -1218,6 +1677,7 @@ def admin_students_page(
     available_extensions,
     selected_extensions,
     paper_types,
+    current_instructions="",
 ):
     ext_items = []
     for ext in available_extensions:
@@ -1253,6 +1713,21 @@ def admin_students_page(
                 </div>
 
                 <div class="card admin-section-card">
+                    <h3 class="section-title">Submission Instructions</h3>
+                    <p class="small muted">These instructions are shown to students on the submission page. Leave blank to use the default.</p>
+                    <form method="POST" class="form-row form-col">
+                        <input type="hidden" name="action" value="update_instructions">
+                        <input type="hidden" name="admin_token" value="{admin_token}">
+                        <textarea name="instructions" rows="4"
+                            style="width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);font-size:14px;resize:vertical;"
+                            placeholder="Enter instructions for students…">{html.escape(current_instructions)}</textarea>
+                        <div style="margin-top:6px;">
+                            <input class="btn btn-primary" type="submit" value="Save Instructions">
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card admin-section-card">
                     <h3 class="section-title">Allowed Extensions</h3>
                     <p class="small muted">
                         Tick the small boxes next to each extension you want to allow, then click <b>Apply Extensions</b>.
@@ -1270,7 +1745,7 @@ def admin_students_page(
 
                 <div class="card admin-section-card danger-zone">
                     <h3 class="section-title">Password Reset</h3>
-                    <p class="small muted">Use this carefully. It updates passwords immediately.</p>
+                    <p class="small muted">Individual passwords update instantly (no page reload). Reset All requires confirmation.</p>
                     <form method="POST" class="form-row form-col" onsubmit="return confirm('Are you sure you want to reset passwords for all users?');">
                         <input type="hidden" name="action" value="reset_all_users">
                         <input type="hidden" name="admin_token" value="{admin_token}">
@@ -1283,7 +1758,7 @@ def admin_students_page(
                 </div>
 
                 <div class="card admin-section-card">
-                    <h3 class="section-title">Student Credentials & Status</h3>
+                    <h3 class="section-title">Student Credentials &amp; Status</h3>
                     <div class="table-wrap table-wrap-sticky">
                         <table class="admin-students-table">
                             <colgroup>
@@ -1305,6 +1780,41 @@ def admin_students_page(
                     </div>
                 </div>
             </main>
+            <script>
+                (function () {{
+                    const adminToken = {json.dumps(admin_token)};
+
+                    window.resetPasswordAsync = function (roll, btn) {{
+                        if (!confirm("Reset password for " + roll + "?")) return;
+                        btn.disabled = true;
+                        btn.textContent = "…";
+                        const row = btn.closest("tr[data-roll]");
+                        fetch("/api/reset_password", {{
+                            method: "POST",
+                            headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                            body: "admin_token=" + encodeURIComponent(adminToken) +
+                                  "&target_roll=" + encodeURIComponent(roll),
+                        }})
+                        .then(function (r) {{ return r.json(); }})
+                        .then(function (data) {{
+                            btn.disabled = false;
+                            btn.textContent = "Reset";
+                            if (data.ok && row) {{
+                                const pwCell = row.querySelector(".pw-cell");
+                                if (pwCell) {{
+                                    pwCell.textContent = data.new_password;
+                                    pwCell.classList.add("pw-flash");
+                                    setTimeout(function () {{ pwCell.classList.remove("pw-flash"); }}, 1800);
+                                }}
+                            }}
+                        }})
+                        .catch(function () {{
+                            btn.disabled = false;
+                            btn.textContent = "Reset";
+                        }});
+                    }};
+                }})();
+            </script>
         </body>
         """,
     )
@@ -1313,7 +1823,7 @@ def admin_students_page(
 def admin_dashboard_page(
     navbar_html,
     rows_html,
-    refresh_seconds=5,
+    admin_token="",
     submitted_count=0,
     pending_count=0,
     total_count=0,
@@ -1324,20 +1834,51 @@ def admin_dashboard_page(
         <body class="bg-soft">
             {navbar_html}
             <main class="container">
+
+                <!-- ── Active Exam Timer card ── -->
+                <div class="card admin-section-card" id="dash-timer-card">
+                    <div class="dash-section-head">
+                        <h3 class="section-title no-margin">&#9201; Active Exam Timer</h3>
+                        <div id="dash-timer-pill" class="timer-pill timer-pill-notset">Loading…</div>
+                    </div>
+                    <div class="dash-timer-controls form-row" style="margin-top:10px;">
+                        <button class="btn btn-secondary" id="dash-pause-btn" onclick="dashTogglePause()">Pause</button>
+                        <span class="small muted" id="dash-timer-detail"></span>
+                    </div>
+                </div>
+
+                <!-- ── Late Submission Requests card ── -->
+                <div class="card admin-section-card" id="dash-late-card">
+                    <h3 class="section-title">Late Submission Requests</h3>
+                    <div id="dash-late-empty" class="small muted" style="display:none;">No pending requests.</div>
+                    <div class="table-wrap" id="dash-late-table-wrap" style="display:none;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th><th>Roll</th><th>Submitted</th>
+                                    <th>Requested At</th><th>Status</th><th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dash-late-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── Submission Stats / Student Table ── -->
                 <div class="card admin-section-card">
                     <h2 class="title">Submission Dashboard</h2>
-                    <p class="small muted">Summary updates every {refresh_seconds}s with page refresh. Filter choice is remembered until you close the tab.</p>
+                    <p class="small muted" id="dash-refresh-note">Auto-refreshes in background every 5 s without disrupting your view.</p>
                     <div class="dashboard-stats" role="region" aria-label="Submission counts">
                         <div class="stat-tile">
-                            <div class="stat-tile-value">{total_count}</div>
+                            <div class="stat-tile-value" id="stat-total">{total_count}</div>
                             <div class="stat-tile-label">Total students</div>
                         </div>
                         <div class="stat-tile stat-tile-submitted">
-                            <div class="stat-tile-value">{submitted_count}</div>
+                            <div class="stat-tile-value" id="stat-submitted">{submitted_count}</div>
                             <div class="stat-tile-label">Submitted</div>
                         </div>
                         <div class="stat-tile stat-tile-pending">
-                            <div class="stat-tile-value">{pending_count}</div>
+                            <div class="stat-tile-value" id="stat-pending">{pending_count}</div>
                             <div class="stat-tile-label">Pending</div>
                         </div>
                     </div>
@@ -1349,8 +1890,9 @@ def admin_dashboard_page(
                             <option value="pending">Pending only</option>
                         </select>
                         <span id="dash-showing" class="small muted"></span>
+                        <span id="dash-last-updated" class="small muted" style="margin-left:auto;"></span>
                     </div>
-                    <div class="table-wrap table-wrap-sticky">
+                    <div class="table-wrap table-wrap-sticky" id="dash-table-wrap">
                         <table class="admin-dashboard-table">
                             <thead>
                                 <tr>
@@ -1366,16 +1908,26 @@ def admin_dashboard_page(
             </main>
             <script>
                 (function() {{
-                    const STORAGE_KEY = "portal_dashboard_filter";
+                    const FILTER_KEY = "portal_dashboard_filter";
+                    const adminToken = {json.dumps(admin_token)};
                     const tbody = document.getElementById("dashboard-tbody");
                     const sel = document.getElementById("dash-filter");
                     const showing = document.getElementById("dash-showing");
-                    const total = {total_count};
-                    if (!tbody || !sel || !showing) return;
+                    const lastUpdated = document.getElementById("dash-last-updated");
+                    const tableWrap = document.getElementById("dash-table-wrap");
+                    const pauseBtn = document.getElementById("dash-pause-btn");
+                    const timerPill = document.getElementById("dash-timer-pill");
+                    const timerDetail = document.getElementById("dash-timer-detail");
+                    const lateEmpty = document.getElementById("dash-late-empty");
+                    const lateTableWrap = document.getElementById("dash-late-table-wrap");
+                    const lateTbody = document.getElementById("dash-late-tbody");
 
+                    let totalCount = {total_count};
+
+                    // ── Filter ────────────────────────────────────────────────
                     function applyFilter() {{
-                        const mode = sel.value;
-                        const rows = tbody.querySelectorAll("tr.dashboard-row");
+                        const mode = sel ? sel.value : "all";
+                        const rows = tbody ? tbody.querySelectorAll("tr.dashboard-row") : [];
                         let visible = 0;
                         rows.forEach(function(tr) {{
                             const st = tr.getAttribute("data-status") || "";
@@ -1383,29 +1935,222 @@ def admin_dashboard_page(
                             tr.style.display = ok ? "" : "none";
                             if (ok) visible += 1;
                         }});
+                        if (!showing) return;
                         if (mode === "all") {{
-                            showing.textContent = "Showing all " + total + " students.";
+                            showing.textContent = "Showing all " + totalCount + " students.";
                         }} else {{
-                            const label = mode === "submitted" ? "submitted" : "pending";
-                            showing.textContent = "Showing " + visible + " of " + total + " (" + label + " only).";
+                            showing.textContent = "Showing " + visible + " of " + totalCount + " (" + mode + " only).";
                         }}
                     }}
 
                     try {{
-                        const saved = sessionStorage.getItem(STORAGE_KEY);
+                        const saved = sessionStorage.getItem(FILTER_KEY);
                         if (saved === "all" || saved === "submitted" || saved === "pending") {{
-                            sel.value = saved;
+                            if (sel) sel.value = saved;
                         }}
                     }} catch (e) {{}}
 
-                    sel.addEventListener("change", function() {{
-                        try {{ sessionStorage.setItem(STORAGE_KEY, sel.value); }} catch (e) {{}}
-                        applyFilter();
-                    }});
+                    if (sel) {{
+                        sel.addEventListener("change", function() {{
+                            try {{ sessionStorage.setItem(FILTER_KEY, sel.value); }} catch (e) {{}}
+                            applyFilter();
+                        }});
+                    }}
                     applyFilter();
+
+                    // ── Escape HTML ───────────────────────────────────────────
+                    function esc(s) {{
+                        return String(s)
+                            .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                            .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+                            .replace(/'/g,"&#39;");
+                    }}
+
+                    // ── Build table row HTML ──────────────────────────────────
+                    function buildRows(rows) {{
+                        return rows.map(function(r) {{
+                            const sc = r.status === "submitted" ? "status-green" : "status-red";
+                            const label = r.status === "submitted" ? "Submitted" : "Pending";
+                            let nameCell;
+                            if (r.status === "submitted") {{
+                                nameCell = "<span class='dash-folder-link' " +
+                                    "onclick='openSubmissionFolder(" + JSON.stringify(esc(r.roll)) + ")' " +
+                                    "title='Click to open submission folder on server'>" +
+                                    esc(r.name) + "</span>";
+                            }} else {{
+                                nameCell = esc(r.name);
+                            }}
+                            return "<tr class='dashboard-row' data-status='" + esc(r.status) + "'>" +
+                                "<td>" + nameCell + "</td><td>" + esc(r.roll) + "</td>" +
+                                "<td>" + esc(r.ip) + "</td><td>" + esc(r.time) + "</td>" +
+                                "<td><span class='" + sc + "'>" + label + "</span></td>" +
+                                "</tr>";
+                        }}).join("");
+                    }}
+
+                    // ── Format seconds ────────────────────────────────────────
+                    function fmt(s) {{
+                        if (s === null || s === undefined) return "--:--";
+                        const h = Math.floor(s / 3600);
+                        const m = Math.floor((s % 3600) / 60);
+                        const sc = s % 60;
+                        if (h > 0) return h + ":" + String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                        return String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
+                    }}
+
+                    // ── Update timer UI ───────────────────────────────────────
+                    function updateTimerUI(d) {{
+                        if (!timerPill) return;
+                        if (pauseBtn) pauseBtn.textContent = d.is_paused ? "Resume" : "Pause";
+                        timerPill.className = "timer-pill";
+                        if (d.phase === "not_set") {{
+                            timerPill.classList.add("timer-pill-notset");
+                            timerPill.textContent = "No timer set";
+                            if (timerDetail) timerDetail.textContent = "";
+                        }} else if (d.phase === "before_exam") {{
+                            timerPill.classList.add("timer-pill-before");
+                            timerPill.textContent = "Starts in " + fmt(d.seconds_until_start);
+                            if (timerDetail) timerDetail.textContent = d.is_paused ? "⏸ Paused" : "";
+                        }} else if (d.phase === "active") {{
+                            timerPill.classList.add("timer-pill-active");
+                            timerPill.textContent = fmt(d.seconds_remaining) + " remaining";
+                            if (timerDetail) timerDetail.textContent = d.is_paused ? "⏸ Paused" : "";
+                        }} else if (d.phase === "ended") {{
+                            timerPill.classList.add("timer-pill-ended");
+                            timerPill.textContent = "Exam ended";
+                            if (timerDetail) timerDetail.textContent = "";
+                        }}
+                    }}
+
+                    // ── Build late requests table ─────────────────────────────
+                    function updateLateRequests(reqs) {{
+                        if (!reqs || reqs.length === 0) {{
+                            if (lateEmpty) lateEmpty.style.display = "";
+                            if (lateTableWrap) lateTableWrap.style.display = "none";
+                            return;
+                        }}
+                        if (lateEmpty) lateEmpty.style.display = "none";
+                        if (lateTableWrap) lateTableWrap.style.display = "";
+                        if (!lateTbody) return;
+                        lateTbody.innerHTML = reqs.map(function(r) {{
+                            const reqTime = r.requested_at ? new Date(r.requested_at * 1000).toLocaleString() : "-";
+                            const submittedLabel = r.submitted ? "<span class='status-green'>Yes</span>" : "<span class='status-red'>No</span>";
+                            let statusLabel = r.status;
+                            let actions = "";
+                            if (r.status === "pending") {{
+                                statusLabel = "<b class='status-orange'>Pending</b>";
+                                actions = "<button class='btn btn-primary btn-xs' onclick='handleRequest(" +
+                                    JSON.stringify(esc(r.roll)) + "," + JSON.stringify("approve") + ")'>Approve</button> " +
+                                    "<button class='btn btn-red btn-xs' onclick='handleRequest(" +
+                                    JSON.stringify(esc(r.roll)) + "," + JSON.stringify("reject") + ")'>Reject</button>";
+                            }} else if (r.status === "approved") {{
+                                statusLabel = "<span class='status-green'>Approved</span>";
+                            }} else {{
+                                statusLabel = "<span class='status-red'>Rejected</span>";
+                            }}
+                            return "<tr>" +
+                                "<td>" + esc(r.name) + "</td><td>" + esc(r.roll) + "</td>" +
+                                "<td>" + submittedLabel + "</td><td>" + esc(reqTime) + "</td>" +
+                                "<td>" + statusLabel + "</td><td>" + actions + "</td>" +
+                                "</tr>";
+                        }}).join("");
+                    }}
+
+                    window.handleRequest = async function(roll, decision) {{
+                        try {{
+                            const resp = await fetch("/api/handle_late_request", {{
+                                method: "POST",
+                                headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                                body: "admin_token=" + encodeURIComponent(adminToken) +
+                                      "&roll=" + encodeURIComponent(roll) +
+                                      "&decision=" + encodeURIComponent(decision),
+                            }});
+                            const data = await resp.json();
+                            if (data.ok) refreshData();
+                        }} catch (e) {{}}
+                    }};
+
+                    window.openSubmissionFolder = async function(roll) {{
+                        try {{
+                            const resp = await fetch(
+                                "/admin_open_folder?token=" + encodeURIComponent(adminToken) +
+                                "&roll=" + encodeURIComponent(roll),
+                                {{cache: "no-store"}}
+                            );
+                            const data = await resp.json();
+                            if (!data.ok) {{
+                                alert("Could not open folder: " + (data.error || "Unknown error"));
+                            }}
+                        }} catch (e) {{
+                            alert("Could not reach server.");
+                        }}
+                    }};
+
+                    window.dashTogglePause = async function() {{
+                        try {{
+                            const r1 = await fetch("/api/timer", {{cache: "no-store"}});
+                            const cur = await r1.json();
+                            const act = cur.is_paused ? "resume" : "pause";
+                            await fetch("/api/timer_control", {{
+                                method: "POST",
+                                headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                                body: "admin_token=" + encodeURIComponent(adminToken) + "&action=" + act,
+                            }});
+                            refreshData();
+                        }} catch (e) {{}}
+                    }};
+
+                    // ── Background refresh (scroll-preserving) ────────────────
+                    async function refreshData() {{
+                        try {{
+                            const url = "/admin_dashboard_data?token=" + encodeURIComponent(adminToken);
+                            const resp = await fetch(url, {{cache: "no-store"}});
+                            if (resp.status === 401) {{
+                                // Session expired — redirect to login
+                                window.location.href = "/";
+                                return;
+                            }}
+                            if (!resp.ok) return;
+                            const data = await resp.json();
+                            if (!data.ok) return;
+
+                            // Update stats
+                            totalCount = data.total_count;
+                            const el = (id) => document.getElementById(id);
+                            if (el("stat-total")) el("stat-total").textContent = data.total_count;
+                            if (el("stat-submitted")) el("stat-submitted").textContent = data.submitted_count;
+                            if (el("stat-pending")) el("stat-pending").textContent = data.pending_count;
+
+                            // Update timer
+                            if (data.timer) updateTimerUI(data.timer);
+
+                            // Update late requests
+                            if (data.late_requests) updateLateRequests(data.late_requests);
+
+                            // Update student table — preserve scroll position
+                            if (tbody && data.rows) {{
+                                const scrollTop = tableWrap ? tableWrap.scrollTop : 0;
+                                const scrollLeft = tableWrap ? tableWrap.scrollLeft : 0;
+                                tbody.innerHTML = buildRows(data.rows);
+                                if (tableWrap) {{
+                                    tableWrap.scrollTop = scrollTop;
+                                    tableWrap.scrollLeft = scrollLeft;
+                                }}
+                                applyFilter();
+                            }}
+
+                            // Update last-refreshed label
+                            if (lastUpdated) {{
+                                const now = new Date();
+                                lastUpdated.textContent = "Updated " + now.toLocaleTimeString();
+                            }}
+                        }} catch (e) {{ console.error("Dashboard refresh error:", e); }}
+                    }}
+
+                    refreshData();
+                    setInterval(refreshData, 5000);
                 }})();
             </script>
         </body>
         """,
-        auto_refresh_seconds=refresh_seconds,
     )

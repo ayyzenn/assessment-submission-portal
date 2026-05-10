@@ -16,8 +16,7 @@ Thumbs.db
 
 # Runtime/generated portal data
 submissions/
-submission_logs.csv
-student_credentials.xlsx
-
+logs/
+questions_paper/*
 # Local datasets / runtime sheets (optional to keep untracked)
 students.xlsx
