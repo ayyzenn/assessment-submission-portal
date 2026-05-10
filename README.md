@@ -15,13 +15,21 @@ This project is designed for real classroom/lab use with many concurrent logins.
 - Admin and student authentication flow
 - Multi-paper-type question material delivery (A/B/C...)
 - Student one-time final submission flow
+- Global exam timer with start/end, pause/resume, and reset controls
+- Student-side timer warnings and automatic lock when exam time ends
+- Late submission request flow (student request, teacher approve/reject)
+- Student-specific extra-time window after approval
 - Per-IP anti-duplicate submission protection
 - Admin tools:
   - paper setup and uploads
   - student management
-  - submission dashboard
+   - submission dashboard with auto-refresh and filter
+   - late request decision controls
   - credential export
 - Configurable upload rules (max files + allowed extensions)
+- File preview with per-file size and empty-file validation
+- Async single-student password reset from admin table
+- Admin-editable student instructions shown on student home page
 - Built-in mini games (Snake + Flappy Bird) for students
 - Dark/light mode UI toggle
 
@@ -40,8 +48,11 @@ This project is designed for real classroom/lab use with many concurrent logins.
 - `students.xlsx`: student roster + passwords + paper type assignments
 - `submissions/`: uploaded student files (organized per roll no.)
 - `question_paper/`: uploaded exam materials (organized per paper type)
-- `submission_logs.csv`: timestamped submission activity
-- `submission_ip_track.txt`: accepted IP-to-roll tracking
+- `logs/submission_logs.csv`: timestamped submission activity
+- `logs/submission_ip_track.txt`: accepted IP-to-roll tracking
+- `logs/exam_timer.json`: persisted timer state
+- `logs/late_requests.json`: persisted late-request state
+- `logs/game_leaderboard.csv`: persisted game leaderboard
 
 ---
 
@@ -135,17 +146,20 @@ PORTAL_BIND=127.0.0.1 python3 server.py
 
 1. Keep server terminal open; do not close it.
 2. Share LAN URL with students.
-3. Monitor `Dashboard` for submission status.
+3. Monitor `Dashboard` for submission status and late requests.
 4. If needed, use student password reset actions from admin panel.
-5. Use `Export Credentials` when required by invigilation process.
+5. When a student requests extra time after timeout, use Dashboard actions:
+   - `Approve` to grant temporary extra submission time
+   - `Reject` to deny and keep submission locked
+6. Use `Export Credentials` when required by invigilation process.
 
 ### After exam
 
 1. Collect files from `submissions/<roll-no>/`.
 2. Optionally archive:
    - `submissions/`
-   - `submission_logs.csv`
-   - `submission_ip_track.txt`
+   - `logs/submission_logs.csv`
+   - `logs/submission_ip_track.txt`
 3. Stop server with `Ctrl+C`.
 
 ---
@@ -164,7 +178,23 @@ PORTAL_BIND=127.0.0.1 python3 server.py
    - Select files (respect extension and count rules)
    - Tick confirmation checkbox
    - Submit once (final submission is one-time only)
-5. Successful upload page confirms submitted file names.
+5. If exam time has ended:
+   - Student sees locked state
+   - Student can request extra time from teacher
+   - After approval, student sees temporary extra-time submission access
+6. Successful upload page confirms submitted file names.
+
+---
+
+## Late Request Lifecycle
+
+1. Exam reaches `ended` phase for student.
+2. Student submits `Request Extra Time`.
+3. Request appears in Admin Dashboard `Late Submission Requests`.
+4. Admin decides:
+   - `Approve`: student enters `extra_time` phase for a short window.
+   - `Reject`: student remains locked and sees rejection status.
+5. Request status is visible in the dashboard and synced to student UI.
 
 ---
 
@@ -230,10 +260,36 @@ sudo nft list ruleset
 ## Logs, Data, and What They Mean
 
 - `students.xlsx`: source of truth for student records and passwords
-- `submission_logs.csv`: append-only submission timestamps and IPs
-- `submission_ip_track.txt`: first accepted roll number per IP
+- `logs/submission_logs.csv`: append-only submission timestamps and IPs
+- `logs/submission_ip_track.txt`: first accepted roll number per IP
+- `logs/exam_timer.json`: current timer start/end/pause state
+- `logs/late_requests.json`: late-request history and statuses
+- `logs/game_leaderboard.csv`: saved game scores
 - `submissions/`: actual uploaded student files
 - `question_paper/type_<x>/`: files students can view/download
+
+---
+
+## Manual End-to-End Test Checklist
+
+Run these before live exam use:
+
+1. Admin login and page access (`Admin Home`, `Manage Students`, `Dashboard`).
+2. Question paper upload and student `View Materials` visibility.
+3. Student upload validation:
+   - valid allowed files
+   - disallowed extension rejection
+   - empty file rejection
+4. Timer lock behavior at/after timeout.
+5. Late request flow:
+   - student request creation
+   - admin approve and student extra-time access
+   - admin reject and student rejection visibility
+6. Access control checks:
+   - invalid/expired token on protected APIs returns `401`
+7. Post-submit lock:
+   - student session closed after successful submission
+   - re-login shows `Submission Already Completed`
 
 ---
 

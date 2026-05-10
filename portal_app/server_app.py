@@ -1039,6 +1039,7 @@ class SecureLabHandler(http.server.BaseHTTPRequestHandler):
             student_home_page(
                 name=name,
                 roll=roll,
+                token=token,
                 view_qp_url=self.student_url("/question_paper", roll, token),
                 submit_url=self.student_url("/student_submit", roll, token),
                 games_url=self.student_url("/student_games", roll, token),

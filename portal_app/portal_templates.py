@@ -216,7 +216,7 @@ def admin_navbar(admin_home_url, students_url, dashboard_url, export_url, logout
     """
 
 
-def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructions=""):
+def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructions="", token=""):
     return _page(
         "Student Portal",
         f"""
@@ -224,7 +224,7 @@ def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructio
             <div class="container-student container-games">
                 <div class="panel-head">
                     <h2 class="title">Student Assessment Portal</h2>
-                    <p class="muted text-on-dark no-margin">Welcome, {name} ({roll})</p>
+                    <p class="muted text-on-dark no-margin">Welcome, {html.escape(name)} ({html.escape(roll)})</p>
                 </div>
                 <div id="home-timer-bar" class="home-timer-bar home-timer-bar-hidden">
                     <span id="home-timer-icon" class="home-timer-icon">&#9201;</span>
@@ -238,20 +238,56 @@ def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructio
                     <div class="info-box" style="margin-bottom:12px;">
                         {html.escape(instructions) if instructions else "Step 1: View question paper and attached materials.<br>Step 2: Prepare your solution and submit final files."}
                     </div>
-                    <div class="form-row">
+
+                    <!-- ── Shown when timer is active or not set ── -->
+                    <div id="home-normal-actions" class="form-row">
                         <a class="btn-link btn-purple" href="{view_qp_url}">View Materials</a>
                         <a class="btn-link btn-primary" href="{submit_url}">Submit Solution</a>
+                    </div>
+
+                    <!-- ── Shown when timer has ended ── -->
+                    <div id="home-locked-section" style="display:none;" class="submission-locked-notice">
+                        <div class="locked-icon">&#128274;</div>
+                        <h3 class="locked-title">Submission Time Has Ended</h3>
+                        <p class="locked-body" id="home-locked-body">
+                            The submission window is now closed.
+                        </p>
+                        <div id="home-late-section">
+                            <button id="home-late-btn" class="btn btn-primary"
+                                    onclick="homeRequestExtraTime()" style="display:none;">
+                                Request Extra Time from Teacher
+                            </button>
+                            <div id="home-late-status" class="late-request-status" style="display:none;"></div>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <a class="btn-link btn-purple" href="{view_qp_url}">View Materials</a>
+                        </div>
+                    </div>
+
+                    <!-- ── Shown only during approved extra time ── -->
+                    <div id="home-extra-actions" style="display:none;" class="form-row">
+                        <a class="btn-link btn-purple" href="{view_qp_url}">View Materials</a>
+                        <a class="btn-link btn-primary" href="{submit_url}">Submit Now</a>
                     </div>
                 </div>
             </div>
             <script>
                 (function () {{
-                    const roll = {json.dumps(roll)};
-                    const token = {json.dumps("")};
-                    // token not available on home page - use public timer
-                    const bar = document.getElementById("home-timer-bar");
-                    const text = document.getElementById("home-timer-text");
-                    const icon = document.getElementById("home-timer-icon");
+                    const _roll  = {json.dumps(roll)};
+                    const _token = {json.dumps(token)};
+                    const bar         = document.getElementById("home-timer-bar");
+                    const text        = document.getElementById("home-timer-text");
+                    const icon        = document.getElementById("home-timer-icon");
+                    const normalSec   = document.getElementById("home-normal-actions");
+                    const lockedSec   = document.getElementById("home-locked-section");
+                    const lockedBody  = document.getElementById("home-locked-body");
+                    const extraSec    = document.getElementById("home-extra-actions");
+                    const lateSec     = document.getElementById("home-late-section");
+                    const lateBtn     = document.getElementById("home-late-btn");
+                    const lateStatus  = document.getElementById("home-late-status");
+
+                    let _lateState = null; // null | "pending" | "approved" | "rejected"
+                    let _shownLocked = false;
 
                     function fmt(s) {{
                         if (s === null || s === undefined) return "--:--";
@@ -262,35 +298,128 @@ def student_home_page(name, roll, view_qp_url, submit_url, games_url, instructio
                         return String(m).padStart(2,"0") + ":" + String(sc).padStart(2,"0");
                     }}
 
+                    function showNormal() {{
+                        if (normalSec) normalSec.style.display = "";
+                        if (lockedSec) lockedSec.style.display = "none";
+                        if (extraSec)  extraSec.style.display  = "none";
+                    }}
+
+                    function showLocked() {{
+                        if (normalSec) normalSec.style.display = "none";
+                        if (lockedSec) lockedSec.style.display = "";
+                        if (extraSec)  extraSec.style.display  = "none";
+                    }}
+
+                    function showExtra() {{
+                        if (normalSec) normalSec.style.display = "none";
+                        if (lockedSec) lockedSec.style.display = "none";
+                        if (extraSec)  extraSec.style.display  = "";
+                    }}
+
+                    function applyLateState(state) {{
+                        _lateState = state;
+                        if (!lateBtn || !lateStatus) return;
+                        if (state === "pending") {{
+                            lateBtn.style.display = "none";
+                            lateStatus.style.display = "";
+                            lateStatus.className = "late-request-status late-status-pending";
+                            lateStatus.textContent = "Request submitted. Waiting for teacher approval.";
+                        }} else if (state === "approved") {{
+                            lateBtn.style.display = "none";
+                            lateStatus.style.display = "";
+                            lateStatus.className = "late-request-status late-status-approved";
+                            lateStatus.textContent = "Extra time approved. Click 'Submit Now' above.";
+                        }} else if (state === "rejected") {{
+                            lateBtn.style.display = "none";
+                            lateStatus.style.display = "";
+                            lateStatus.className = "late-request-status late-status-rejected";
+                            lateStatus.textContent = "Your extra time request was rejected by the teacher.";
+                        }} else {{
+                            // null — show the request button
+                            lateBtn.style.display = "";
+                            lateStatus.style.display = "none";
+                        }}
+                    }}
+
+                    window.homeRequestExtraTime = async function() {{
+                        if (lateBtn) lateBtn.disabled = true;
+                        try {{
+                            const resp = await fetch("/api/request_extra_time", {{
+                                method: "POST",
+                                headers: {{"Content-Type": "application/x-www-form-urlencoded"}},
+                                body: "roll_no=" + encodeURIComponent(_roll) + "&auth_token=" + encodeURIComponent(_token),
+                            }});
+                            const data = await resp.json();
+                            if (data.ok) {{
+                                applyLateState(data.status || "pending");
+                            }} else {{
+                                if (lateBtn) lateBtn.disabled = false;
+                                alert("Could not send request. Please try again.");
+                            }}
+                        }} catch (e) {{
+                            if (lateBtn) lateBtn.disabled = false;
+                        }}
+                    }};
+
                     async function pollTimer() {{
                         try {{
-                            const resp = await fetch("/api/timer", {{cache: "no-store"}});
+                            // Use authenticated student endpoint (returns extra_time phase if approved)
+                            const url = "/api/student_timer?roll=" + encodeURIComponent(_roll) + "&token=" + encodeURIComponent(_token);
+                            const resp = await fetch(url, {{cache: "no-store"}});
                             if (!resp.ok) return;
                             const d = await resp.json();
+                            const phase = d.phase;
+                            const rem   = d.seconds_remaining;
+                            const syncedLateStatus = d.late_request_status || null;
+
+                            if (syncedLateStatus !== _lateState) {{
+                                applyLateState(syncedLateStatus);
+                            }}
+
                             bar.classList.remove("home-timer-bar-hidden","home-timer-active","home-timer-warn","home-timer-crit","home-timer-ended","home-timer-before");
-                            if (d.phase === "not_set") {{ bar.classList.add("home-timer-bar-hidden"); return; }}
+
+                            if (phase === "not_set") {{
+                                bar.classList.add("home-timer-bar-hidden");
+                                showNormal();
+                                return;
+                            }}
+
                             bar.classList.remove("home-timer-bar-hidden");
-                            if (d.phase === "before_exam") {{
+
+                            if (phase === "before_exam") {{
                                 bar.classList.add("home-timer-before");
                                 text.textContent = "Exam starts in " + fmt(d.seconds_until_start) + (d.is_paused ? " (paused)" : "");
                                 icon.textContent = "⏳";
-                            }} else if (d.phase === "active") {{
-                                const rem = d.seconds_remaining;
+                                showNormal();
+                            }} else if (phase === "active") {{
                                 if (rem <= 300) {{ bar.classList.add("home-timer-crit"); icon.textContent = "🔴"; }}
                                 else if (rem <= 600) {{ bar.classList.add("home-timer-warn"); icon.textContent = "⚠️"; }}
                                 else {{ bar.classList.add("home-timer-active"); icon.textContent = "⏱️"; }}
                                 text.textContent = (d.is_paused ? "PAUSED — " : "") + "Time remaining: " + fmt(rem);
-                            }} else if (d.phase === "extra_time") {{
+                                showNormal();
+                            }} else if (phase === "extra_time") {{
                                 bar.classList.add("home-timer-crit");
-                                text.textContent = "Extra time: " + fmt(d.seconds_remaining);
                                 icon.textContent = "⏰";
+                                text.textContent = "Extra time: " + fmt(rem);
+                                // Show submit button + approved status
+                                applyLateState("approved");
+                                showExtra();
+                                if (lockedBody) lockedBody.textContent = "Extra time granted! Submit your files now.";
                             }} else {{
+                                // ended
                                 bar.classList.add("home-timer-ended");
-                                text.textContent = "Submission time has ended.";
                                 icon.textContent = "🔒";
+                                text.textContent = "Submission time has ended.";
+                                showLocked();
+                                if (!_shownLocked) {{
+                                    _shownLocked = true;
+                                    if (syncedLateStatus === null) applyLateState(null);
+                                }}
+                                if (syncedLateStatus === null) applyLateState(null);
                             }}
                         }} catch (e) {{}}
                     }}
+
                     pollTimer();
                     setInterval(pollTimer, 3000);
                 }})();
@@ -1237,7 +1366,7 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv, instructi
                         const files = Array.from((fileInput && fileInput.files) || []);
                         const emptyFiles = files.filter(function(f) {{ return f.size === 0; }});
                         if (emptyFiles.length > 0) {{
-                            alert("Cannot submit: " + emptyFiles.length + " empty file(s) selected.\n" +
+                            alert("Cannot submit: " + emptyFiles.length + " empty file(s) selected.\\n" +
                                   "Remove empty files before submitting.");
                             return false;
                         }}
@@ -1306,7 +1435,7 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv, instructi
                             if (lateStatusDiv) {{
                                 lateStatusDiv.style.display = "";
                                 lateStatusDiv.className = "late-request-status late-status-pending";
-                                lateStatusDiv.textContent = "⌛ Request submitted. Waiting for teacher approval…";
+                                lateStatusDiv.textContent = "Request submitted. Waiting for teacher approval.";
                             }}
                         }} else if (status === "approved") {{
                             if (lateBtn) lateBtn.style.display = "none";
@@ -1400,11 +1529,14 @@ def student_upload_page(roll, name, token, max_files, allowed_ext_csv, instructi
                             const resp = await fetch(url, {{cache: "no-store"}});
                             if (!resp.ok) return;
                             const d = await resp.json();
+                            const syncedLateStatus = d.late_request_status || null;
+                            if (syncedLateStatus !== _lateStatus) {{
+                                showLateRequestSection(syncedLateStatus);
+                            }}
                             updateTimerUI(d);
 
-                            // Sync late request status from timer
-                            if (d.phase === "ended" && _lateStatus === null) {{
-                                // Check if there's already a pending request
+                            if (d.phase === "ended" && syncedLateStatus === null) {{
+                                showLateRequestSection(null);
                             }} else if (d.phase === "extra_time" && _lateStatus !== "approved") {{
                                 showLateRequestSection("approved");
                             }}
@@ -1714,7 +1846,7 @@ def admin_students_page(
 
                 <div class="card admin-section-card">
                     <h3 class="section-title">Submission Instructions</h3>
-                    <p class="small muted">These instructions are shown to students on the submission page. Leave blank to use the default.</p>
+                    <p class="small muted">These instructions are shown to students on the home page. Leave blank to use the default.</p>
                     <form method="POST" class="form-row form-col">
                         <input type="hidden" name="action" value="update_instructions">
                         <input type="hidden" name="admin_token" value="{admin_token}">

@@ -189,21 +189,35 @@ def is_submission_locked() -> bool:
 def get_student_timer_status(roll: str) -> dict:
     """Return timer status for a specific student, accounting for extra time."""
     base = get_timer_status()
+    late_status = None
+    now = time.time()
     with _LATE_LOCK:
         req = _LATE_REQUESTS.get(str(roll))
+        if req is not None:
+            status = req.get("status")
+            if status == "approved":
+                extra_end = req.get("extra_end_time")
+                if extra_end is not None and now < extra_end:
+                    late_status = "approved"
+                else:
+                    # Approval window has expired; student may request again.
+                    late_status = None
+            else:
+                late_status = status
+
+    result = dict(base)
+    result["late_request_status"] = late_status
 
     if req is not None and req.get("status") == "approved":
         extra_end = req.get("extra_end_time")
         if extra_end is not None:
-            now = time.time()
             if now < extra_end:
-                result = dict(base)
                 result["phase"] = "extra_time"
                 result["seconds_remaining"] = max(0, int(extra_end - now))
                 result["extra_end_time"] = extra_end
                 return result
 
-    return base
+    return result
 
 
 def is_submission_locked_for_student(roll: str) -> bool:
@@ -218,7 +232,21 @@ def add_late_request(roll: str, name: str) -> bool:
     """Register a late-submission request. Returns False if one already exists."""
     with _LATE_LOCK:
         key = str(roll)
-        if key in _LATE_REQUESTS:
+        existing = _LATE_REQUESTS.get(key)
+        if existing is not None:
+            # Allow fresh request if prior approval window has already expired.
+            if existing.get("status") == "approved":
+                extra_end = existing.get("extra_end_time")
+                if extra_end is not None and time.time() >= extra_end:
+                    _LATE_REQUESTS[key] = {
+                        "roll": str(roll),
+                        "name": str(name),
+                        "requested_at": time.time(),
+                        "status": "pending",
+                        "extra_end_time": None,
+                    }
+                    _save_late_requests()
+                    return True
             return False
         _LATE_REQUESTS[key] = {
             "roll": str(roll),
@@ -285,11 +313,17 @@ def cleanup_stale_late_requests(submitted_rolls: set) -> int:
         to_remove = []
         for roll, req in _LATE_REQUESTS.items():
             if roll in submitted_rolls:
-                continue  # student has files — keep record
-            if req.get("status") == "approved":
+                continue  # student submitted — keep record
+            status = req.get("status")
+            if status == "pending":
+                continue  # waiting for teacher decision — always keep
+            if status == "rejected":
+                continue  # keep rejected state visible to student/admin
+            if status == "approved":
                 extra_end = req.get("extra_end_time")
                 if extra_end is not None and now < extra_end:
-                    continue  # still inside extra-time window
+                    continue  # still inside extra-time window — keep
+            # approved+expired with no submission — remove
             to_remove.append(roll)
         if not to_remove:
             return 0
